@@ -70,7 +70,8 @@ function validatePayload(data: unknown): CreateAcademyPayload {
 
 const callableOptions = {
   region: "us-central1" as const,
-  cors: true
+  cors: true,
+  invoker: "public" as const
 };
 
 export const createAcademyWithOwner = onCall(callableOptions, async (request) => {
@@ -120,16 +121,29 @@ export const createAcademyWithOwner = onCall(callableOptions, async (request) =>
   } catch (error) {
     const authError = error as { code?: string };
     if (authError.code !== "auth/user-not-found") {
-      logger.error("owner lookup failed", { code: authError.code ?? "unknown" });
+      logger.error("owner lookup failed", {
+        code: authError.code ?? "unknown",
+        ownerEmail: payload.ownerEmail
+      });
       throw new HttpsError("internal", "No se pudo validar el usuario owner.");
     }
     generatedPassword = payload.password || randomPassword();
-    const created = await adminAuth.createUser({
-      email: payload.ownerEmail,
-      displayName: payload.ownerName,
-      password: generatedPassword
-    });
-    ownerUid = created.uid;
+    try {
+      const created = await adminAuth.createUser({
+        email: payload.ownerEmail,
+        displayName: payload.ownerName,
+        password: generatedPassword
+      });
+      ownerUid = created.uid;
+    } catch (createError) {
+      const authCreateError = createError as { code?: string; message?: string };
+      logger.error("owner creation failed", {
+        code: authCreateError.code ?? "unknown",
+        message: authCreateError.message ?? "unknown",
+        ownerEmail: payload.ownerEmail
+      });
+      throw new HttpsError("internal", "No se pudo crear el usuario owner en Authentication.");
+    }
   }
 
   const academyRef = db.collection("academies").doc();
@@ -189,7 +203,17 @@ export const createAcademyWithOwner = onCall(callableOptions, async (request) =>
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp()
   });
-  await batch.commit();
+  try {
+    await batch.commit();
+  } catch (batchError) {
+    const firestoreError = batchError as { message?: string };
+    logger.error("academy batch commit failed", {
+      message: firestoreError.message ?? "unknown",
+      academyName: payload.academyName,
+      ownerUid
+    });
+    throw new HttpsError("internal", "No se pudo guardar la academia en Firestore.");
+  }
   logger.info("academy created successfully", {
     academyId: academyRef.id,
     ownerUid,

@@ -2,13 +2,13 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 
 const navItems = [
-  { to: "/app/dashboard", label: "Perfil Owner" },
+  { to: "/app/dashboard", label: "Resumen" },
   { to: "/app/students", label: "Alumnos" },
   { to: "/app/fees", label: "Cuotas" },
   { to: "/app/payments", label: "Pagos" },
-  { to: "/app/debt", label: "Deuda" },
-  { to: "/app/users", label: "Usuarios" },
-  { to: "/app/settings", label: "Configuración" }
+  { to: "/app/debt", label: "Morosidad" },
+  { to: "/app/users", label: "Equipo" },
+  { to: "/app/settings", label: "Academia" }
 ];
 
 export function AppShell() {
@@ -49,7 +49,7 @@ export function AppShell() {
               onClick={() => void logout()}
               className="rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary"
             >
-              Cerrar sesión
+              Cerrar sesion
             </button>
           </header>
           <Outlet />

@@ -1,4 +1,4 @@
-import {
+ï»¿import {
   addDoc,
   collection,
   doc,
@@ -10,10 +10,10 @@ import {
   updateDoc
 } from "firebase/firestore";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
 import { db } from "../../lib/firebase";
 import { PLAN_LIMITS } from "../../lib/plans";
-import { Panel } from "../../components/ui/Panel";
 import type { AcademyPlan } from "../../lib/types";
 
 interface Student {
@@ -24,19 +24,40 @@ interface Student {
   status: "active" | "inactive";
 }
 
-const emptyForm = { fullName: "", email: "", phone: "", status: "active" as const };
+interface StudentFormState {
+  fullName: string;
+  email: string;
+  phone: string;
+  status: Student["status"];
+}
+
+const emptyForm: StudentFormState = {
+  fullName: "",
+  email: "",
+  phone: "",
+  status: "active"
+};
 
 export function StudentsPage() {
-  const { membership, canWriteAcademyData } = useAuth();
+  const { membership, canWriteAcademyData, isPreviewMode } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState<StudentFormState>(emptyForm);
   const [plan, setPlan] = useState<AcademyPlan>("basic");
   const [error, setError] = useState<string | null>(null);
 
   const academyPath = membership ? `academies/${membership.academyId}` : null;
 
   async function loadStudents() {
+    if (isPreviewMode) {
+      setStudents([
+        { id: "student-1", fullName: "Ana Perez", email: "ana@demo.com", phone: "1111-1111", status: "active" },
+        { id: "student-2", fullName: "Bruno Diaz", email: "bruno@demo.com", phone: "2222-2222", status: "inactive" }
+      ]);
+      setPlan("pro");
+      return;
+    }
+
     if (!academyPath || !membership) return;
     const [studentsSnap, academySnap] = await Promise.all([
       getDocs(query(collection(db, `${academyPath}/students`), orderBy("fullName", "asc"))),
@@ -44,25 +65,23 @@ export function StudentsPage() {
     ]);
     setStudents(studentsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Student, "id">) })));
     if (academySnap.exists()) {
-      const rawPlan = academySnap.data().plan as string;
-      setPlan(rawPlan === "studio" ? "premium" : (rawPlan as AcademyPlan));
+      setPlan(academySnap.data().plan as AcademyPlan);
     }
   }
 
   useEffect(() => {
     void loadStudents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [academyPath]);
+  }, [academyPath, isPreviewMode]);
 
   const maxStudents = useMemo(() => PLAN_LIMITS[plan], [plan]);
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canWriteAcademyData || !academyPath) return;
+    if (!canWriteAcademyData || !academyPath || isPreviewMode) return;
 
     setError(null);
     if (!editingId && maxStudents !== null && students.length >= maxStudents) {
-      setError(`Límite alcanzado para plan ${plan}: ${maxStudents} alumnos.`);
+      setError(`Limite alcanzado para plan ${plan}: ${maxStudents} alumnos.`);
       return;
     }
 
@@ -96,9 +115,9 @@ export function StudentsPage() {
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <div className="lg:col-span-2">
-        <Panel title="Students">
+        <Panel title="Alumnos">
           <p className="mb-3 text-xs text-muted">
-            Plan actual: <span className="uppercase text-primary">{plan}</span> · Límite: {maxStudents ?? "Ilimitado"} ·
+            Plan actual: <span className="uppercase text-primary">{plan}</span> Â· Limite: {maxStudents ?? "Ilimitado"} Â·
             Usados: {students.length}
           </p>
           <div className="overflow-x-auto">
@@ -106,10 +125,10 @@ export function StudentsPage() {
               <thead className="text-left text-muted">
                 <tr>
                   <th className="px-3 py-2">Nombre</th>
-                  <th className="px-3 py-2">Email</th>
-                  <th className="px-3 py-2">Teléfono</th>
+                  <th className="px-3 py-2">Correo</th>
+                  <th className="px-3 py-2">Telefono</th>
                   <th className="px-3 py-2">Estado</th>
-                  <th className="px-3 py-2">Acción</th>
+                  <th className="px-3 py-2">Accion</th>
                 </tr>
               </thead>
               <tbody>
@@ -121,7 +140,7 @@ export function StudentsPage() {
                     <td className="px-3 py-3 uppercase">{student.status}</td>
                     <td className="px-3 py-3">
                       <button
-                        disabled={!canWriteAcademyData}
+                        disabled={!canWriteAcademyData || isPreviewMode}
                         onClick={() => onEdit(student)}
                         className="rounded-brand border border-slate-600 px-2 py-1 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
                       >
@@ -151,7 +170,7 @@ export function StudentsPage() {
               onChange={(value) => setForm((prev) => ({ ...prev, email: value }))}
             />
             <Field
-              label="Teléfono"
+              label="Telefono"
               value={form.phone}
               onChange={(value) => setForm((prev) => ({ ...prev, phone: value }))}
             />
@@ -162,16 +181,16 @@ export function StudentsPage() {
                 onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value as Student["status"] }))}
                 className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
               >
-                <option value="active">active</option>
-                <option value="inactive">inactive</option>
+                <option value="active">Activo</option>
+                <option value="inactive">Inactivo</option>
               </select>
             </label>
             {error && <p className="text-xs text-danger">{error}</p>}
             <button
-              disabled={!canWriteAcademyData}
+              disabled={!canWriteAcademyData || isPreviewMode}
               className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40"
             >
-              {editingId ? "Guardar cambios" : "Crear alumno"}
+              {isPreviewMode ? "Modo demo" : editingId ? "Guardar cambios" : "Crear alumno"}
             </button>
           </form>
         </Panel>

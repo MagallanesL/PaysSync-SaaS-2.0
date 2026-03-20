@@ -21,7 +21,7 @@ interface Payment {
 }
 
 export function DebtPage() {
-  const { membership } = useAuth();
+  const { membership, isPreviewMode } = useAuth();
   const academyPath = membership ? `academies/${membership.academyId}` : null;
   const [students, setStudents] = useState<Student[]>([]);
   const [fees, setFees] = useState<Fee[]>([]);
@@ -29,6 +29,21 @@ export function DebtPage() {
 
   useEffect(() => {
     async function load() {
+      if (isPreviewMode) {
+        setStudents([
+          { id: "student-1", fullName: "Ana Perez" },
+          { id: "student-2", fullName: "Bruno Diaz" }
+        ]);
+        setFees([
+          { studentId: "student-1", amount: 12000, status: "paid" },
+          { studentId: "student-2", amount: 15000, status: "pending" }
+        ]);
+        setPayments([
+          { studentId: "student-1", amount: 12000 },
+          { studentId: "student-2", amount: 5000 }
+        ]);
+        return;
+      }
       if (!academyPath) return;
       const [studentsSnap, feesSnap, paymentsSnap] = await Promise.all([
         getDocs(collection(db, `${academyPath}/students`)),
@@ -40,7 +55,7 @@ export function DebtPage() {
       setPayments(paymentsSnap.docs.map((d) => d.data() as Payment));
     }
     void load();
-  }, [academyPath]);
+  }, [academyPath, isPreviewMode]);
 
   const debtRows = useMemo(() => {
     return students
@@ -73,7 +88,7 @@ export function DebtPage() {
   }, [debtRows]);
 
   return (
-    <Panel title="Debt por alumno">
+    <Panel title="Morosidad por alumno">
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
         <Summary label="Al dia" value={totals.alDia} color="text-secondary" />
         <Summary label="Parcial" value={totals.parcial} color="text-warning" />

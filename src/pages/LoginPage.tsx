@@ -1,3 +1,4 @@
+import { FirebaseError } from "firebase/app";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
@@ -6,11 +7,15 @@ import { auth } from "../lib/firebase";
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { firebaseUser, isRoot, membership, loading } = useAuth();
+  const { firebaseUser, isRoot, membership, loading, isPreviewMode } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  if (isPreviewMode) {
+    return <Navigate to="/app/dashboard" replace />;
+  }
 
   if (!loading && firebaseUser) {
     if (isRoot) return <Navigate to="/root/dashboard" replace />;
@@ -22,11 +27,23 @@ export function LoginPage() {
     event.preventDefault();
     setSubmitting(true);
     setError("");
+
     try {
       await signInWithEmailAndPassword(auth, email.trim(), password);
       navigate("/", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo iniciar sesión.");
+      if (err instanceof FirebaseError) {
+        const authMessageByCode: Record<string, string> = {
+          "auth/invalid-credential": "Email o password incorrectos, o la cuenta no existe en Firebase Authentication.",
+          "auth/invalid-email": "El email no tiene un formato valido.",
+          "auth/user-disabled": "Esta cuenta esta deshabilitada en Firebase Authentication.",
+          "auth/too-many-requests": "Demasiados intentos fallidos. Espera un momento y vuelve a intentar.",
+          "auth/network-request-failed": "Fallo de red al intentar iniciar sesion."
+        };
+        setError(authMessageByCode[err.code] ?? `${err.code}: ${err.message}`);
+      } else {
+        setError(err instanceof Error ? err.message : "No se pudo iniciar sesion.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -37,7 +54,7 @@ export function LoginPage() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(0,194,255,0.2),transparent_30%),radial-gradient(circle_at_85%_20%,rgba(34,197,94,0.15),transparent_35%)]" />
       <form onSubmit={handleSubmit} className="z-10 w-full max-w-md rounded-brand border border-slate-700/80 bg-surface p-6 shadow-soft">
         <h1 className="font-display text-3xl text-primary">PaySync</h1>
-        <p className="mt-2 text-sm text-muted">Gestión financiera para academias.</p>
+        <p className="mt-2 text-sm text-muted">Gestion financiera para academias.</p>
 
         <div className="mt-6 grid gap-3">
           <label className="grid gap-1 text-sm">

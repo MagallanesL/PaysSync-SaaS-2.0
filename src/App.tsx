@@ -27,6 +27,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<IndexRedirect />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/root" element={<Navigate to="/root/dashboard" replace />} />
       <Route
         path="/no-membership"
         element={

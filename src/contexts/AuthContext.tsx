@@ -26,6 +26,7 @@ interface AuthContextValue {
   membership: AcademyMembership | null;
   loading: boolean;
   isRoot: boolean;
+  isPreviewMode: boolean;
   canWriteAcademyData: boolean;
   logout: () => Promise<void>;
 }
@@ -171,6 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       membership,
       loading,
       isRoot: profile?.platformRole === "root",
+      isPreviewMode: false,
       canWriteAcademyData: membership?.role === "owner" || membership?.role === "staff",
       logout: () => signOut(auth)
     }),

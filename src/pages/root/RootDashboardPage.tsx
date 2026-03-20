@@ -1,10 +1,11 @@
-﻿import { httpsCallable } from "firebase/functions";
+import { FirebaseError } from "firebase/app";
+import { httpsCallable } from "firebase/functions";
 import { collection, doc, getDocs, serverTimestamp, updateDoc } from "firebase/firestore";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth } from "../../contexts/AuthContext";
+import { Panel } from "../../components/ui/Panel";
 import { db, functions } from "../../lib/firebase";
 import { PLAN_LIMITS, PLAN_PRICES, formatPlanLimit } from "../../lib/plans";
-import { Panel } from "../../components/ui/Panel";
 import type { Academy, AcademyPlan } from "../../lib/types";
 
 interface AcademyFormState {
@@ -55,7 +56,7 @@ export function RootDashboardPage() {
     setAcademies(
       academySnap.docs.map((docSnap) => {
         const data = docSnap.data() as Omit<Academy, "id"> & { plan?: string };
-        const normalizedPlan: AcademyPlan = data.plan === "studio" ? "premium" : (data.plan as AcademyPlan);
+        const normalizedPlan = data.plan as AcademyPlan;
         return {
           id: docSnap.id,
           ...data,
@@ -89,12 +90,14 @@ export function RootDashboardPage() {
     setSubmitting(true);
     setError(null);
     setMessage(null);
+
     console.log("[PaySync] createAcademyWithOwner:start", {
       academyName: form.academyName,
       ownerEmail: form.ownerEmail,
       plan: form.plan,
       ownerRole: form.ownerRole
     });
+
     try {
       const callable = httpsCallable(functions, "createAcademyWithOwner");
       const response = await callable({
@@ -106,6 +109,7 @@ export function RootDashboardPage() {
         password: form.tempPassword || undefined
       });
       const data = response.data as CreateAcademyResult;
+
       console.log("[PaySync] createAcademyWithOwner:success", data);
       setMessage(
         data.generatedPassword
@@ -121,13 +125,25 @@ export function RootDashboardPage() {
         details?: unknown;
         customData?: unknown;
       };
+
       console.error("[PaySync] createAcademyWithOwner:error", {
         code: errorObject?.code ?? null,
         message: errorObject?.message ?? null,
         details: errorObject?.details ?? null,
         customData: errorObject?.customData ?? null
       });
-      setError(err instanceof Error ? err.message : "No se pudo crear la academia.");
+
+      if (err instanceof FirebaseError) {
+        if (err.code === "functions/unavailable") {
+          setError("La Cloud Function createAcademyWithOwner no responde. Compila y despliega functions en este proyecto Firebase.");
+        } else if (err.code === "functions/permission-denied") {
+          setError("La cuenta autenticada no tiene rol root en users/{uid}.");
+        } else {
+          setError(err.message);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : "No se pudo crear la academia.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -174,7 +190,7 @@ export function RootDashboardPage() {
               onClick={() => void logout()}
               className="rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary"
             >
-              Cerrar sesión
+              Cerrar sesion
             </button>
           </div>
         </header>
@@ -196,7 +212,7 @@ export function RootDashboardPage() {
                     <tr>
                       <th className="px-3 py-2">Nombre</th>
                       <th className="px-3 py-2">Plan</th>
-                      <th className="px-3 py-2">Límite</th>
+                      <th className="px-3 py-2">Limite</th>
                       <th className="px-3 py-2">Estado</th>
                       <th className="px-3 py-2">Owner</th>
                       <th className="px-3 py-2">Acciones</th>
@@ -212,7 +228,7 @@ export function RootDashboardPage() {
                     ) : academies.length === 0 ? (
                       <tr>
                         <td className="px-3 py-3 text-muted" colSpan={6}>
-                          No hay academias todavía.
+                          No hay academias todavia.
                         </td>
                       </tr>
                     ) : (
@@ -325,7 +341,7 @@ export function RootDashboardPage() {
                     }
                     options={["trial", "active", "suspended"]}
                   />
-                  <p className="text-xs text-muted">Límite alumnos: {formatPlanLimit(editState.plan)}</p>
+                  <p className="text-xs text-muted">Limite alumnos: {formatPlanLimit(editState.plan)}</p>
                   <div className="flex gap-2">
                     <button className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg">Guardar</button>
                     <button
@@ -408,4 +424,3 @@ function Select({
     </label>
   );
 }
-

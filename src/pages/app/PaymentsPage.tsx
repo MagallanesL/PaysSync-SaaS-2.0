@@ -1,4 +1,4 @@
-import {
+﻿import {
   addDoc,
   collection,
   doc,
@@ -41,7 +41,7 @@ const emptyForm = {
 };
 
 export function PaymentsPage() {
-  const { membership, canWriteAcademyData } = useAuth();
+  const { membership, canWriteAcademyData, isPreviewMode } = useAuth();
   const academyPath = membership ? `academies/${membership.academyId}` : null;
   const [payments, setPayments] = useState<Payment[]>([]);
   const [students, setStudents] = useState<StudentOption[]>([]);
@@ -49,6 +49,27 @@ export function PaymentsPage() {
   const [form, setForm] = useState(emptyForm);
 
   async function loadData() {
+    if (isPreviewMode) {
+      setStudents([
+        { id: "student-1", fullName: "Ana Perez" },
+        { id: "student-2", fullName: "Bruno Diaz" }
+      ]);
+      setFees([
+        { id: "fee-1", concept: "Marzo" },
+        { id: "fee-2", concept: "Abril" }
+      ]);
+      setPayments([
+        {
+          id: "payment-1",
+          studentId: "student-1",
+          feeId: "fee-1",
+          amount: 12000,
+          paymentDate: "2026-03-01",
+          method: "transfer"
+        }
+      ]);
+      return;
+    }
     if (!academyPath) return;
     const [studentsSnap, feesSnap, paymentsSnap] = await Promise.all([
       getDocs(query(collection(db, `${academyPath}/students`), orderBy("fullName", "asc"))),
@@ -62,12 +83,11 @@ export function PaymentsPage() {
 
   useEffect(() => {
     void loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [academyPath]);
+  }, [academyPath, isPreviewMode]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canWriteAcademyData || !academyPath) return;
+    if (!canWriteAcademyData || !academyPath || isPreviewMode) return;
 
     const payload = {
       studentId: form.studentId,
@@ -93,16 +113,16 @@ export function PaymentsPage() {
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <div className="lg:col-span-2">
-        <Panel title="Payments">
+        <Panel title="Pagos">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="text-left text-muted">
                 <tr>
                   <th className="px-3 py-2">Alumno</th>
-                  <th className="px-3 py-2">Fee</th>
+                  <th className="px-3 py-2">Cuota</th>
                   <th className="px-3 py-2">Monto</th>
                   <th className="px-3 py-2">Fecha</th>
-                  <th className="px-3 py-2">Método</th>
+                  <th className="px-3 py-2">Metodo</th>
                 </tr>
               </thead>
               <tbody>
@@ -116,7 +136,9 @@ export function PaymentsPage() {
                     </td>
                     <td className="px-3 py-3">${payment.amount}</td>
                     <td className="px-3 py-3">{payment.paymentDate}</td>
-                    <td className="px-3 py-3 uppercase">{payment.method}</td>
+                    <td className="px-3 py-3 uppercase">
+                      {payment.method === "cash" ? "EFECTIVO" : payment.method === "transfer" ? "TRANSFERENCIA" : "TARJETA"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -135,10 +157,13 @@ export function PaymentsPage() {
               required
             />
             <Select
-              label="Fee (opcional)"
+              label="Cuota (opcional)"
               value={form.feeId}
               onChange={(value) => setForm((prev) => ({ ...prev, feeId: value }))}
-              options={[{ value: "", label: "Sin fee vinculada" }, ...fees.map((f) => ({ value: f.id, label: f.concept }))]}
+              options={[
+                { value: "", label: "Sin cuota vinculada" },
+                ...fees.map((f) => ({ value: f.id, label: f.concept }))
+              ]}
             />
             <Field label="Monto" type="number" value={form.amount} onChange={(value) => setForm((prev) => ({ ...prev, amount: value }))} />
             <Field
@@ -148,21 +173,21 @@ export function PaymentsPage() {
               onChange={(value) => setForm((prev) => ({ ...prev, paymentDate: value }))}
             />
             <Select
-              label="Método"
+              label="Metodo"
               value={form.method}
               onChange={(value) => setForm((prev) => ({ ...prev, method: value }))}
               options={[
-                { value: "cash", label: "cash" },
-                { value: "transfer", label: "transfer" },
-                { value: "card", label: "card" }
+                { value: "cash", label: "Efectivo" },
+                { value: "transfer", label: "Transferencia" },
+                { value: "card", label: "Tarjeta" }
               ]}
               required
             />
             <button
-              disabled={!canWriteAcademyData}
+              disabled={!canWriteAcademyData || isPreviewMode}
               className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40"
             >
-              Registrar pago
+              {isPreviewMode ? "Modo demo" : "Registrar pago"}
             </button>
           </form>
         </Panel>

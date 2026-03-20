@@ -1,4 +1,4 @@
-import {
+﻿import {
   addDoc,
   collection,
   doc,
@@ -9,9 +9,9 @@ import {
   updateDoc
 } from "firebase/firestore";
 import { useEffect, useState, type FormEvent } from "react";
+import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
 import { db } from "../../lib/firebase";
-import { Panel } from "../../components/ui/Panel";
 
 interface StudentOption {
   id: string;
@@ -27,23 +27,43 @@ interface Fee {
   status: "pending" | "paid" | "overdue";
 }
 
-const emptyForm = {
+interface FeeFormState {
+  studentId: string;
+  concept: string;
+  amount: string;
+  dueDate: string;
+  status: Fee["status"];
+}
+
+const emptyForm: FeeFormState = {
   studentId: "",
   concept: "",
   amount: "",
   dueDate: "",
-  status: "pending" as const
+  status: "pending"
 };
 
 export function FeesPage() {
-  const { membership, canWriteAcademyData } = useAuth();
+  const { membership, canWriteAcademyData, isPreviewMode } = useAuth();
   const [fees, setFees] = useState<Fee[]>([]);
   const [students, setStudents] = useState<StudentOption[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState<FeeFormState>(emptyForm);
   const academyPath = membership ? `academies/${membership.academyId}` : null;
 
   async function loadData() {
+    if (isPreviewMode) {
+      setStudents([
+        { id: "student-1", fullName: "Ana Perez" },
+        { id: "student-2", fullName: "Bruno Diaz" }
+      ]);
+      setFees([
+        { id: "fee-1", studentId: "student-1", concept: "Marzo", amount: 12000, dueDate: "2026-03-10", status: "paid" },
+        { id: "fee-2", studentId: "student-2", concept: "Marzo", amount: 15000, dueDate: "2026-03-10", status: "pending" }
+      ]);
+      return;
+    }
+
     if (!academyPath) return;
     const [studentsSnap, feesSnap] = await Promise.all([
       getDocs(query(collection(db, `${academyPath}/students`), orderBy("fullName", "asc"))),
@@ -60,12 +80,11 @@ export function FeesPage() {
 
   useEffect(() => {
     void loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [academyPath]);
+  }, [academyPath, isPreviewMode]);
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canWriteAcademyData || !academyPath) return;
+    if (!canWriteAcademyData || !academyPath || isPreviewMode) return;
     const payload = {
       studentId: form.studentId,
       concept: form.concept,
@@ -102,7 +121,7 @@ export function FeesPage() {
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <div className="lg:col-span-2">
-        <Panel title="Fees">
+        <Panel title="Cuotas">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="text-left text-muted">
@@ -112,7 +131,7 @@ export function FeesPage() {
                   <th className="px-3 py-2">Monto</th>
                   <th className="px-3 py-2">Vencimiento</th>
                   <th className="px-3 py-2">Estado</th>
-                  <th className="px-3 py-2">Acción</th>
+                  <th className="px-3 py-2">Accion</th>
                 </tr>
               </thead>
               <tbody>
@@ -128,7 +147,7 @@ export function FeesPage() {
                     <td className="px-3 py-3">
                       <button
                         onClick={() => editFee(fee)}
-                        disabled={!canWriteAcademyData}
+                        disabled={!canWriteAcademyData || isPreviewMode}
                         className="rounded-brand border border-slate-600 px-2 py-1 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
                       >
                         Editar
@@ -143,7 +162,7 @@ export function FeesPage() {
       </div>
 
       <div>
-        <Panel title={editingId ? "Editar fee" : "Nueva fee"}>
+        <Panel title={editingId ? "Editar cuota" : "Nueva cuota"}>
           <form onSubmit={(e) => void handleSave(e)} className="grid gap-3 text-sm">
             <label className="grid gap-1">
               Alumno
@@ -176,16 +195,16 @@ export function FeesPage() {
                 onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value as Fee["status"] }))}
                 className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
               >
-                <option value="pending">pending</option>
-                <option value="paid">paid</option>
-                <option value="overdue">overdue</option>
+                <option value="pending">Pendiente</option>
+                <option value="paid">Pagada</option>
+                <option value="overdue">Vencida</option>
               </select>
             </label>
             <button
-              disabled={!canWriteAcademyData}
+              disabled={!canWriteAcademyData || isPreviewMode}
               className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40"
             >
-              {editingId ? "Guardar cambios" : "Crear fee"}
+              {isPreviewMode ? "Modo demo" : editingId ? "Guardar cambios" : "Crear cuota"}
             </button>
           </form>
         </Panel>
