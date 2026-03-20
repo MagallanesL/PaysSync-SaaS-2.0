@@ -105,7 +105,7 @@ export function AcademyDashboardPage() {
     };
   }, [paymentRows, payments, students.length, usersCount]);
 
-  const dashboardTitle = membership?.academyName ? `Resumen de ${membership.academyName}` : "Resumen de la academia";
+  const dashboardTitle = membership?.academyName ? `Resumen de ${membership.academyName}` : "Resumen del centro";
   const upcomingCount = fees.filter((fee) => Number(fee.amount || 0) > 0).length;
   const collectionRate =
     paymentRows.length > 0 ? Math.round((summary.paidStudents / paymentRows.length) * 100) : 0;
@@ -188,7 +188,7 @@ export function AcademyDashboardPage() {
             <QuickLink to="/app/payments" label="Registrar pagos" />
             <QuickLink to="/app/debt" label="Revisar morosidad" />
             <QuickLink to="/app/users" label="Administrar equipo" />
-            <QuickLink to="/app/settings" label="Configurar academia" />
+            <QuickLink to="/app/settings" label="Configurar centro" />
           </div>
         </Panel>
       </div>

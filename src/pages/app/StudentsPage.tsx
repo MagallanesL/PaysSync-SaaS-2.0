@@ -22,6 +22,19 @@ interface Student {
   email: string;
   phone: string;
   status: "active" | "inactive";
+  disciplines?: AssignedDiscipline[];
+}
+
+interface AssignedDiscipline {
+  disciplineId: string;
+  name: string;
+  billingType: "monthly_fee" | "enrollment" | "exam" | "product" | "uniform" | "other";
+  price: number;
+}
+
+interface DisciplineOption extends AssignedDiscipline {
+  id: string;
+  active: boolean;
 }
 
 interface StudentFormState {
@@ -29,13 +42,15 @@ interface StudentFormState {
   email: string;
   phone: string;
   status: Student["status"];
+  disciplineIds: string[];
 }
 
 const emptyForm: StudentFormState = {
   fullName: "",
   email: "",
   phone: "",
-  status: "active"
+  status: "active",
+  disciplineIds: []
 };
 
 export function StudentsPage() {
@@ -45,25 +60,48 @@ export function StudentsPage() {
   const [form, setForm] = useState<StudentFormState>(emptyForm);
   const [plan, setPlan] = useState<AcademyPlan>("basic");
   const [error, setError] = useState<string | null>(null);
+  const [disciplines, setDisciplines] = useState<DisciplineOption[]>([]);
 
   const academyPath = membership ? `academies/${membership.academyId}` : null;
 
   async function loadStudents() {
     if (isPreviewMode) {
       setStudents([
-        { id: "student-1", fullName: "Ana Perez", email: "ana@demo.com", phone: "1111-1111", status: "active" },
-        { id: "student-2", fullName: "Bruno Diaz", email: "bruno@demo.com", phone: "2222-2222", status: "inactive" }
+        {
+          id: "student-1",
+          fullName: "Ana Perez",
+          email: "ana@demo.com",
+          phone: "1111-1111",
+          status: "active",
+          disciplines: [{ disciplineId: "disc-1", name: "Freestyle", billingType: "monthly_fee", price: 20000 }]
+        },
+        { id: "student-2", fullName: "Bruno Diaz", email: "bruno@demo.com", phone: "2222-2222", status: "inactive", disciplines: [] }
+      ]);
+      setDisciplines([
+        { id: "disc-1", disciplineId: "disc-1", name: "Freestyle", billingType: "monthly_fee", price: 20000, active: true },
+        { id: "disc-2", disciplineId: "disc-2", name: "Indumentaria", billingType: "uniform", price: 12000, active: true }
       ]);
       setPlan("pro");
       return;
     }
 
     if (!academyPath || !membership) return;
-    const [studentsSnap, academySnap] = await Promise.all([
+    const [studentsSnap, academySnap, disciplinesSnap] = await Promise.all([
       getDocs(query(collection(db, `${academyPath}/students`), orderBy("fullName", "asc"))),
-      getDoc(doc(db, "academies", membership.academyId))
+      getDoc(doc(db, "academies", membership.academyId)),
+      getDocs(query(collection(db, `${academyPath}/disciplines`), orderBy("name", "asc")))
     ]);
     setStudents(studentsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Student, "id">) })));
+    setDisciplines(
+      disciplinesSnap.docs.map((d) => ({
+        id: d.id,
+        disciplineId: d.id,
+        name: String(d.data().name ?? ""),
+        billingType: d.data().billingType as DisciplineOption["billingType"],
+        price: Number(d.data().price ?? 0),
+        active: Boolean(d.data().active ?? true)
+      }))
+    );
     if (academySnap.exists()) {
       setPlan(academySnap.data().plan as AcademyPlan);
     }
@@ -85,14 +123,31 @@ export function StudentsPage() {
       return;
     }
 
+    const assignedDisciplines = disciplines
+      .filter((discipline) => form.disciplineIds.includes(discipline.id))
+      .map((discipline) => ({
+        disciplineId: discipline.id,
+        name: discipline.name,
+        billingType: discipline.billingType,
+        price: discipline.price
+      }));
+
     if (editingId) {
       await updateDoc(doc(db, `${academyPath}/students`, editingId), {
-        ...form,
+        fullName: form.fullName,
+        email: form.email,
+        phone: form.phone,
+        status: form.status,
+        disciplines: assignedDisciplines,
         updatedAt: serverTimestamp()
       });
     } else {
       await addDoc(collection(db, `${academyPath}/students`), {
-        ...form,
+        fullName: form.fullName,
+        email: form.email,
+        phone: form.phone,
+        status: form.status,
+        disciplines: assignedDisciplines,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
@@ -108,7 +163,8 @@ export function StudentsPage() {
       fullName: student.fullName,
       email: student.email,
       phone: student.phone,
-      status: student.status
+      status: student.status,
+      disciplineIds: (student.disciplines ?? []).map((discipline) => discipline.disciplineId)
     });
   }
 
@@ -127,6 +183,7 @@ export function StudentsPage() {
                   <th className="px-3 py-2">Nombre</th>
                   <th className="px-3 py-2">Correo</th>
                   <th className="px-3 py-2">Telefono</th>
+                  <th className="px-3 py-2">Disciplinas</th>
                   <th className="px-3 py-2">Estado</th>
                   <th className="px-3 py-2">Accion</th>
                 </tr>
@@ -137,6 +194,11 @@ export function StudentsPage() {
                     <td className="px-3 py-3">{student.fullName}</td>
                     <td className="px-3 py-3 text-muted">{student.email}</td>
                     <td className="px-3 py-3 text-muted">{student.phone}</td>
+                    <td className="px-3 py-3 text-muted">
+                      {(student.disciplines ?? []).length > 0
+                        ? (student.disciplines ?? []).map((discipline) => discipline.name).join(", ")
+                        : "-"}
+                    </td>
                     <td className="px-3 py-3 uppercase">{student.status}</td>
                     <td className="px-3 py-3">
                       <button
@@ -174,6 +236,39 @@ export function StudentsPage() {
               value={form.phone}
               onChange={(value) => setForm((prev) => ({ ...prev, phone: value }))}
             />
+            <div className="grid gap-2">
+              <p className="text-sm">Disciplinas asignadas</p>
+              <div className="grid gap-2 rounded-brand border border-slate-700 bg-bg p-3">
+                {disciplines.filter((discipline) => discipline.active).length > 0 ? (
+                  disciplines
+                    .filter((discipline) => discipline.active)
+                    .map((discipline) => (
+                      <label key={discipline.id} className="flex items-center justify-between gap-3 text-sm text-muted">
+                        <span>
+                          {discipline.name} <span className="text-xs uppercase">({discipline.billingType})</span>
+                        </span>
+                        <span className="flex items-center gap-3">
+                          <span className="text-primary">${discipline.price}</span>
+                          <input
+                            type="checkbox"
+                            checked={form.disciplineIds.includes(discipline.id)}
+                            onChange={(event) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                disciplineIds: event.target.checked
+                                  ? [...prev.disciplineIds, discipline.id]
+                                  : prev.disciplineIds.filter((id) => id !== discipline.id)
+                              }))
+                            }
+                          />
+                        </span>
+                      </label>
+                    ))
+                ) : (
+                  <p className="text-xs text-muted">Primero crea disciplinas en el modulo Disciplinas.</p>
+                )}
+              </div>
+            </div>
             <label className="grid gap-1">
               Estado
               <select

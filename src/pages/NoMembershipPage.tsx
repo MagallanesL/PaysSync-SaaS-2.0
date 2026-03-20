@@ -8,7 +8,7 @@ export function NoMembershipPage() {
       <div className="w-full max-w-lg rounded-brand border border-warning/40 bg-surface p-6 shadow-soft">
         <h1 className="font-display text-2xl text-warning">Sin membresía activa</h1>
         <p className="mt-3 text-sm text-muted">
-          El usuario <span className="text-text">{profile?.email}</span> no tiene acceso activo a ninguna academia.
+          El usuario <span className="text-text">{profile?.email}</span> no tiene acceso activo a ningun centro.
           Contacta al administrador de plataforma para que habilite tu membresía.
         </p>
         <button

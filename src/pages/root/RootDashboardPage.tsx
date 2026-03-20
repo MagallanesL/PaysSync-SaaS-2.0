@@ -1,10 +1,21 @@
 import { FirebaseError } from "firebase/app";
-import { httpsCallable } from "firebase/functions";
-import { collection, doc, getDocs, serverTimestamp, updateDoc } from "firebase/firestore";
+import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+  signOut as signOutSecondary
+} from "firebase/auth";
+import {
+  collection,
+  doc,
+  getDocs,
+  serverTimestamp,
+  updateDoc,
+  writeBatch
+} from "firebase/firestore";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Panel } from "../../components/ui/Panel";
-import { db, functions } from "../../lib/firebase";
+import { db, getSecondaryAuth } from "../../lib/firebase";
 import { PLAN_LIMITS, PLAN_PRICES, formatPlanLimit } from "../../lib/plans";
 import type { Academy, AcademyPlan } from "../../lib/types";
 
@@ -15,13 +26,6 @@ interface AcademyFormState {
   ownerEmail: string;
   ownerRole: "owner" | "staff" | "viewer";
   tempPassword: string;
-}
-
-interface CreateAcademyResult {
-  academyId: string;
-  ownerUid: string;
-  generatedPassword: string | null;
-  isExistingUser: boolean;
 }
 
 interface EditState {
@@ -39,6 +43,46 @@ const initialForm: AcademyFormState = {
   ownerRole: "owner",
   tempPassword: ""
 };
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+}
+
+function randomPassword(length = 12) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$";
+  let output = "";
+  for (let i = 0; i < length; i += 1) {
+    output += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return output;
+}
+
+function getAcademyCreationError(error: unknown) {
+  if (error instanceof FirebaseError) {
+    switch (error.code) {
+      case "auth/email-already-in-use":
+        return "Ese email ya existe en Firebase Auth. Con este enfoque desde frontend no puedo reutilizar cuentas existentes.";
+      case "auth/invalid-email":
+        return "El email del owner no es valido.";
+      case "auth/weak-password":
+        return "La password temporal debe tener al menos 6 caracteres.";
+      case "firestore/permission-denied":
+      case "permission-denied":
+        return "La cuenta root no tiene permisos suficientes en Firestore para crear el centro.";
+      default:
+        return error.message;
+    }
+  }
+
+  return error instanceof Error ? error.message : "No se pudo crear el centro.";
+}
 
 export function RootDashboardPage() {
   const { profile, logout } = useAuth();
@@ -98,23 +142,100 @@ export function RootDashboardPage() {
       ownerRole: form.ownerRole
     });
 
-    try {
-      const callable = httpsCallable(functions, "createAcademyWithOwner");
-      const response = await callable({
-        academyName: form.academyName,
-        plan: form.plan,
-        ownerName: form.ownerName,
-        ownerEmail: form.ownerEmail,
-        ownerRole: form.ownerRole,
-        password: form.tempPassword || undefined
-      });
-      const data = response.data as CreateAcademyResult;
+    const academyName = form.academyName.trim();
+    const ownerName = form.ownerName.trim();
+    const ownerEmail = form.ownerEmail.trim().toLowerCase();
+    const password = form.tempPassword.trim() || randomPassword();
 
-      console.log("[PaySync] createAcademyWithOwner:success", data);
+    if (!academyName || !ownerName || !ownerEmail) {
+      setSubmitting(false);
+      setError("Completa nombre del centro, owner name y owner email.");
+      return;
+    }
+
+    if (!/^\S+@\S+\.\S+$/.test(ownerEmail)) {
+      setSubmitting(false);
+      setError("El email del owner no tiene un formato valido.");
+      return;
+    }
+
+    try {
+      const secondaryAuth = getSecondaryAuth();
+      const credential = await createUserWithEmailAndPassword(secondaryAuth, ownerEmail, password);
+      const ownerUid = credential.user.uid;
+      const academyRef = doc(collection(db, "academies"));
+      const slug = `${slugify(academyName)}-${academyRef.id.slice(0, 6)}`;
+      const batch = writeBatch(db);
+
+      batch.set(doc(db, "users", ownerUid), {
+        email: ownerEmail,
+        displayName: ownerName,
+        platformRole: "user",
+        active: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      batch.set(academyRef, {
+        name: academyName,
+        slug,
+        plan: form.plan,
+        status: "active",
+        owner: {
+          uid: ownerUid,
+          name: ownerName,
+          email: ownerEmail
+        },
+        planLimits: {
+          maxStudents: PLAN_LIMITS[form.plan]
+        },
+        counters: {
+          students: 0,
+          fees: 0,
+          payments: 0
+        },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      batch.set(doc(db, `academies/${academyRef.id}/users/${ownerUid}`), {
+        userId: ownerUid,
+        email: ownerEmail,
+        displayName: ownerName,
+        role: form.ownerRole,
+        status: "active",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      try {
+        await batch.commit();
+      } catch (firestoreError) {
+        try {
+          if (secondaryAuth.currentUser) {
+            await deleteUser(secondaryAuth.currentUser);
+          }
+        } catch {
+          setError(
+            "Se creo el owner en Auth pero fallo Firestore. Revisa Firebase Authentication antes de reintentar."
+          );
+          return;
+        }
+        throw firestoreError;
+      } finally {
+        try {
+          await signOutSecondary(secondaryAuth);
+        } catch {
+          // No-op: primary auth keeps the root session intact.
+        }
+      }
+
+      console.log("[PaySync] createAcademyWithOwner:success", {
+        academyId: academyRef.id,
+        ownerUid
+      });
       setMessage(
-        data.generatedPassword
-          ? `Academia creada. Password temporal generado: ${data.generatedPassword}`
-          : "Academia creada correctamente."
+        form.tempPassword.trim()
+          ? "Centro creado correctamente."
+          : `Centro creado. Password temporal generado: ${password}`
       );
       setForm(initialForm);
       await loadAcademies();
@@ -132,18 +253,7 @@ export function RootDashboardPage() {
         details: errorObject?.details ?? null,
         customData: errorObject?.customData ?? null
       });
-
-      if (err instanceof FirebaseError) {
-        if (err.code === "functions/unavailable") {
-          setError("La Cloud Function createAcademyWithOwner no responde. Compila y despliega functions en este proyecto Firebase.");
-        } else if (err.code === "functions/permission-denied") {
-          setError("La cuenta autenticada no tiene rol root en users/{uid}.");
-        } else {
-          setError(err.message);
-        }
-      } else {
-        setError(err instanceof Error ? err.message : "No se pudo crear la academia.");
-      }
+      setError(getAcademyCreationError(err));
     } finally {
       setSubmitting(false);
     }
@@ -196,7 +306,7 @@ export function RootDashboardPage() {
         </header>
 
         <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <KpiCard label="Academias" value={kpis.total} color="text-primary" />
+          <KpiCard label="Centros" value={kpis.total} color="text-primary" />
           <KpiCard label="Trials" value={kpis.trials} color="text-warning" />
           <KpiCard label="Activas" value={kpis.active} color="text-secondary" />
           <KpiCard label="Suspendidas" value={kpis.suspended} color="text-danger" />
@@ -205,7 +315,7 @@ export function RootDashboardPage() {
 
         <div className="grid gap-4 lg:grid-cols-5">
           <div className="lg:col-span-3">
-            <Panel title="Academias">
+            <Panel title="Centros">
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead className="text-left text-muted">
@@ -228,7 +338,7 @@ export function RootDashboardPage() {
                     ) : academies.length === 0 ? (
                       <tr>
                         <td className="px-3 py-3 text-muted" colSpan={6}>
-                          No hay academias todavia.
+                          No hay centros todavia.
                         </td>
                       </tr>
                     ) : (
@@ -272,10 +382,10 @@ export function RootDashboardPage() {
           </div>
 
           <div className="lg:col-span-2 space-y-4">
-            <Panel title="Crear academia">
+            <Panel title="Crear centro">
               <form onSubmit={handleCreateAcademy} className="grid gap-3 text-sm">
                 <Input
-                  label="Nombre academia"
+                  label="Nombre del centro"
                   value={form.academyName}
                   onChange={(value) => setForm((prev) => ({ ...prev, academyName: value }))}
                 />
@@ -314,13 +424,13 @@ export function RootDashboardPage() {
                   disabled={submitting}
                   className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg transition hover:brightness-110 disabled:opacity-70"
                 >
-                  {submitting ? "Creando..." : "Crear academia"}
+                  {submitting ? "Creando..." : "Crear centro"}
                 </button>
               </form>
             </Panel>
 
             {editState && (
-              <Panel title="Editar academia">
+              <Panel title="Editar centro">
                 <form onSubmit={(event) => void handleSaveEdit(event)} className="grid gap-3 text-sm">
                   <Input
                     label="Nombre"

@@ -1,14 +1,16 @@
 import {
+  collection,
   collectionGroup,
   doc,
   getDoc,
   getDocs,
   limit,
   query,
+  serverTimestamp,
+  setDoc,
   where
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
-import { httpsCallable } from "firebase/functions";
 import {
   createContext,
   useContext,
@@ -17,7 +19,7 @@ import {
   useState,
   type ReactNode
 } from "react";
-import { auth, db, functions } from "../lib/firebase";
+import { auth, db } from "../lib/firebase";
 import type { AcademyMembership, UserProfile } from "../lib/types";
 
 interface AuthContextValue {
@@ -52,6 +54,43 @@ function isMembershipActive(status: unknown) {
 }
 
 async function loadActiveMembership(uid: string, email?: string): Promise<AcademyMembership | null> {
+  const normalizedEmail = email?.toLowerCase().trim();
+
+  const ownerByUidQuery = query(collection(db, "academies"), where("owner.uid", "==", uid), limit(5));
+  const ownerByUidSnap = await getDocs(ownerByUidQuery);
+  let ownerAcademyDoc = ownerByUidSnap.docs.find((docSnap) => docSnap.data().status !== "suspended");
+
+  if (!ownerAcademyDoc && normalizedEmail) {
+    const ownerByEmailQuery = query(collection(db, "academies"), where("owner.email", "==", normalizedEmail), limit(5));
+    const ownerByEmailSnap = await getDocs(ownerByEmailQuery);
+    ownerAcademyDoc = ownerByEmailSnap.docs.find((docSnap) => docSnap.data().status !== "suspended");
+  }
+
+  if (ownerAcademyDoc) {
+    const ownerData = ownerAcademyDoc.data() as Record<string, unknown>;
+    await setDoc(
+      doc(db, `academies/${ownerAcademyDoc.id}/users/${uid}`),
+      {
+        userId: uid,
+        email: normalizedEmail ?? String(ownerData.ownerEmail ?? ""),
+        role: "owner",
+        status: "active",
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp()
+      },
+      { merge: true }
+    );
+
+    return {
+      academyId: ownerAcademyDoc.id,
+      academyName: String(ownerData.name ?? ownerAcademyDoc.id),
+      userId: uid,
+      email: normalizedEmail ?? "",
+      role: "owner",
+      status: "active"
+    };
+  }
+
   // Single-filter query avoids requiring a composite index for userId+status.
   const byUserIdQuery = query(collectionGroup(db, "users"), where("userId", "==", uid), limit(20));
   const byUserIdSnap = await getDocs(byUserIdQuery);
@@ -85,23 +124,6 @@ async function loadActiveMembership(uid: string, email?: string): Promise<Academ
   };
 }
 
-async function trySyncOwnerMembership(): Promise<void> {
-  const callable = httpsCallable(functions, "syncOwnerMembership");
-  await callable();
-}
-
-async function trySyncMembershipByEmail(): Promise<void> {
-  const callable = httpsCallable(functions, "syncMembershipByEmail");
-  await callable();
-}
-
-async function resolveMembershipFromBackend(): Promise<AcademyMembership | null> {
-  const callable = httpsCallable(functions, "resolveMyMembership");
-  const result = await callable();
-  const payload = result.data as { membership?: AcademyMembership | null };
-  return payload.membership ?? null;
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -129,31 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else if (loadedProfile.platformRole === "root") {
           setMembership(null);
         } else {
-          let activeMembership: AcademyMembership | null = null;
-          try {
-            activeMembership = await resolveMembershipFromBackend();
-          } catch {
-            activeMembership = null;
-          }
-          if (!activeMembership) {
-            activeMembership = await loadActiveMembership(user.uid, user.email ?? undefined);
-          }
-          if (!activeMembership) {
-            try {
-              await trySyncOwnerMembership();
-              activeMembership = await loadActiveMembership(user.uid, user.email ?? undefined);
-            } catch {
-              // No-op: fallback to no membership view.
-            }
-          }
-          if (!activeMembership) {
-            try {
-              await trySyncMembershipByEmail();
-              activeMembership = await loadActiveMembership(user.uid, user.email ?? undefined);
-            } catch {
-              // No-op: fallback to no membership view.
-            }
-          }
+          const activeMembership = await loadActiveMembership(user.uid, user.email ?? undefined);
           setMembership(activeMembership);
         }
       } catch {

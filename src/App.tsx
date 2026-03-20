@@ -4,6 +4,7 @@ import { AppShell } from "./components/layout/AppShell";
 import { useAuth } from "./contexts/AuthContext";
 import { AcademyDashboardPage } from "./pages/app/AcademyDashboardPage";
 import { DebtPage } from "./pages/app/DebtPage";
+import { DisciplinesPage } from "./pages/app/DisciplinesPage";
 import { FeesPage } from "./pages/app/FeesPage";
 import { PaymentsPage } from "./pages/app/PaymentsPage";
 import { SettingsPage } from "./pages/app/SettingsPage";
@@ -54,6 +55,8 @@ export default function App() {
       >
         <Route path="dashboard" element={<AcademyDashboardPage />} />
         <Route path="students" element={<StudentsPage />} />
+        <Route path="disciplinas" element={<DisciplinesPage />} />
+        <Route path="disciplines" element={<Navigate to="/app/disciplinas" replace />} />
         <Route path="fees" element={<FeesPage />} />
         <Route path="payments" element={<PaymentsPage />} />
         <Route path="debt" element={<DebtPage />} />

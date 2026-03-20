@@ -4,11 +4,12 @@ import { useAuth } from "../../contexts/AuthContext";
 const navItems = [
   { to: "/app/dashboard", label: "Resumen" },
   { to: "/app/students", label: "Alumnos" },
+  { to: "/app/disciplinas", label: "Disciplinas" },
   { to: "/app/fees", label: "Cuotas" },
   { to: "/app/payments", label: "Pagos" },
   { to: "/app/debt", label: "Morosidad" },
   { to: "/app/users", label: "Equipo" },
-  { to: "/app/settings", label: "Academia" }
+  { to: "/app/settings", label: "Centro" }
 ];
 
 export function AppShell() {
@@ -19,7 +20,7 @@ export function AppShell() {
       <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 md:flex-row md:px-6">
         <aside className="rounded-brand border border-slate-700/80 bg-surface p-4 shadow-soft md:w-64">
           <p className="font-display text-xl text-primary">PaySync</p>
-          <p className="mt-1 text-xs text-muted">{membership?.academyName ?? "Academy"}</p>
+          <p className="mt-1 text-xs text-muted">{membership?.academyName ?? "Centro"}</p>
           <nav className="mt-5 grid gap-1">
             {navItems.map((item) => (
               <NavLink
@@ -40,7 +41,7 @@ export function AppShell() {
         <main className="flex-1">
           <header className="mb-4 flex items-center justify-between rounded-brand border border-slate-700/80 bg-surface px-4 py-3 shadow-soft">
             <div>
-              <p className="text-sm text-muted">Academy panel</p>
+              <p className="text-sm text-muted">Panel del centro</p>
               <p className="text-sm">
                 {profile?.displayName} · <span className="uppercase text-primary">{membership?.role}</span>
               </p>

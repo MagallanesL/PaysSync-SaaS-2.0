@@ -54,7 +54,7 @@ export function LoginPage() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(0,194,255,0.2),transparent_30%),radial-gradient(circle_at_85%_20%,rgba(34,197,94,0.15),transparent_35%)]" />
       <form onSubmit={handleSubmit} className="z-10 w-full max-w-md rounded-brand border border-slate-700/80 bg-surface p-6 shadow-soft">
         <h1 className="font-display text-3xl text-primary">PaySync</h1>
-        <p className="mt-2 text-sm text-muted">Gestion financiera para academias.</p>
+        <p className="mt-2 text-sm text-muted">Gestion financiera para centros.</p>
 
         <div className="mt-6 grid gap-3">
           <label className="grid gap-1 text-sm">

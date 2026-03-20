@@ -31,6 +31,14 @@ service cloud.firestore {
       return academyDoc(academyId).data.status != "suspended";
     }
 
+    function isAcademyOwner(academyId) {
+      return signedIn()
+        && (
+          academyDoc(academyId).data.owner.uid == request.auth.uid
+          || academyDoc(academyId).data.owner.email == request.auth.token.email
+        );
+    }
+
     function isAcademyMember(academyId) {
       return signedIn()
         && exists(membershipPath(academyId))
@@ -46,27 +54,82 @@ service cloud.firestore {
       return isAcademyMember(academyId) && (academyRole(academyId) == "owner" || academyRole(academyId) == "staff");
     }
 
+    function validClientManagedUserProfile() {
+      return request.resource.data.email is string
+        && request.resource.data.displayName is string
+        && request.resource.data.active is bool
+        && request.resource.data.active == true
+        && (
+          request.resource.data.platformRole == "user"
+          || request.resource.data.role == "user"
+        );
+    }
+
     match /users/{uid} {
       allow read: if isRoot() || (signedIn() && request.auth.uid == uid);
-      allow write: if isRoot();
+      allow create: if isRoot()
+        || (
+          signedIn()
+          && request.auth.uid == uid
+          && validClientManagedUserProfile()
+          && request.auth.token.email != null
+          && request.resource.data.email == request.auth.token.email
+        );
+      allow update: if isRoot()
+        || (
+          signedIn()
+          && request.auth.uid == uid
+          && validClientManagedUserProfile()
+          && request.auth.token.email != null
+          && request.resource.data.email == request.auth.token.email
+          && (
+            resource.data.platformRole == "user"
+            || resource.data.role == "user"
+          )
+        );
+      allow delete: if isRoot()
+        || (
+          signedIn()
+          && request.auth.uid == uid
+          && (
+            resource.data.platformRole == "user"
+            || resource.data.role == "user"
+          )
+        );
     }
 
     match /academies/{academyId} {
-      allow read: if isRoot() || isAcademyMember(academyId);
+      allow read: if isRoot() || isAcademyMember(academyId) || isAcademyOwner(academyId);
       allow create, update, delete: if isRoot();
     }
 
     match /academies/{academyId}/users/{uid} {
       allow read: if isRoot()
         || isAcademyMember(academyId)
+        || isAcademyOwner(academyId)
         || (signedIn() && request.auth.uid == uid)
         || (signedIn() && resource.data.userId == request.auth.uid)
         || (signedIn() && resource.data.email == request.auth.token.email)
         || (signedIn() && resource.data.mail == request.auth.token.email);
-      allow create, update, delete: if isRoot() || (isAcademyMember(academyId) && academyRole(academyId) == "owner");
+      allow create: if isRoot()
+        || (isAcademyMember(academyId) && academyRole(academyId) == "owner")
+        || (
+          isAcademyOwner(academyId)
+          && request.auth.uid == uid
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.role == "owner"
+          && request.resource.data.status == "active"
+          && request.resource.data.email == request.auth.token.email
+        );
+      allow update, delete: if isRoot() || (isAcademyMember(academyId) && academyRole(academyId) == "owner");
     }
 
     match /academies/{academyId}/students/{studentId} {
+      allow read: if isRoot() || isAcademyMember(academyId);
+      allow create, update, delete: if isRoot() || canWriteAcademyData(academyId);
+    }
+
+    match /academies/{academyId}/disciplines/{disciplineId} {
       allow read: if isRoot() || isAcademyMember(academyId);
       allow create, update, delete: if isRoot() || canWriteAcademyData(academyId);
     }

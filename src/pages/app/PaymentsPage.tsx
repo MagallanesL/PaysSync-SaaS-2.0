@@ -23,6 +23,25 @@ interface FeeOption {
   concept: string;
 }
 
+function formatFeeLabel(data: Record<string, unknown>) {
+  const concept = String(data.concept ?? "").trim();
+  if (concept) return concept;
+
+  const category = String(data.category ?? "").trim();
+  const period = String(data.period ?? "").trim();
+  const observation = String(data.observation ?? "").trim();
+
+  if (category === "monthly_fee" && period) {
+    const [year, month] = period.split("-");
+    const periodLabel = year && month ? `${month}/${year}` : period;
+    return observation ? `Cuota mensual ${periodLabel} - ${observation}` : `Cuota mensual ${periodLabel}`;
+  }
+
+  if (observation) return observation;
+  if (category) return category;
+  return "Cuota";
+}
+
 interface Payment {
   id: string;
   studentId: string;
@@ -55,8 +74,8 @@ export function PaymentsPage() {
         { id: "student-2", fullName: "Bruno Diaz" }
       ]);
       setFees([
-        { id: "fee-1", concept: "Marzo" },
-        { id: "fee-2", concept: "Abril" }
+        { id: "fee-1", concept: "Cuota mensual 03/2026" },
+        { id: "fee-2", concept: "Indumentaria - Zapatillas" }
       ]);
       setPayments([
         {
@@ -77,7 +96,7 @@ export function PaymentsPage() {
       getDocs(query(collection(db, `${academyPath}/payments`), orderBy("paymentDate", "desc")))
     ]);
     setStudents(studentsSnap.docs.map((d) => ({ id: d.id, fullName: d.data().fullName as string })));
-    setFees(feesSnap.docs.map((d) => ({ id: d.id, concept: d.data().concept as string })));
+    setFees(feesSnap.docs.map((d) => ({ id: d.id, concept: formatFeeLabel(d.data() as Record<string, unknown>) })));
     setPayments(paymentsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Payment, "id">) })));
   }
 

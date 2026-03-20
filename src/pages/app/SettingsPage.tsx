@@ -22,7 +22,7 @@ export function SettingsPage() {
     async function loadSettings() {
       if (isPreviewMode) {
         setSettings({
-          name: "Academia Demo",
+          name: "Centro Demo",
           slug: "academia-demo",
           plan: "pro",
           status: "active",
@@ -43,11 +43,11 @@ export function SettingsPage() {
   }, [isPreviewMode, membership]);
 
   return (
-    <Panel title="Datos de la academia">
+    <Panel title="Datos del centro">
       {settings ? (
         <div className="grid gap-2 text-sm">
           <p>
-            <span className="text-muted">Academia:</span> {settings.name}
+            <span className="text-muted">Centro:</span> {settings.name}
           </p>
           <p>
             <span className="text-muted">Slug:</span> {settings.slug}
