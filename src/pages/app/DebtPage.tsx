@@ -1,52 +1,58 @@
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
+import { formatMembershipStatus } from "../../lib/display";
 import { db } from "../../lib/firebase";
+import { diffDays, getFeeBalance, normalizePaidAmount, resolveFeeStatus, type FeeStatus } from "../../lib/fees";
 
 interface Student {
   id: string;
   fullName: string;
-  phone: string;
+  contactPhone: string;
+  status: "active" | "inactive";
 }
 
 interface Fee {
-  id?: string;
+  id: string;
   studentId: string;
   concept?: string;
   period?: string;
   amount: number;
-  status: string;
-  dueDate?: string;
-}
-
-interface Payment {
-  studentId: string;
-  amount: number;
-}
-
-function formatPeriodLabel(period?: string, fallbackConcept?: string, dueDate?: string) {
-  if (period) {
-    const [year, month] = period.split("-");
-    if (year && month) return `${month}/${year}`;
-    return period;
-  }
-  if (fallbackConcept) return fallbackConcept;
-  if (dueDate) return dueDate;
-  return "periodo pendiente";
+  paidAmount: number;
+  balance: number;
+  status: FeeStatus;
+  dueDate: string;
+  disciplineName?: string;
 }
 
 function sanitizePhone(phone: string) {
   return phone.replace(/\D/g, "");
 }
 
-function buildWhatsAppLink(studentName: string, phone: string, pendingPeriods: string[]) {
+function buildWhatsAppLink(studentName: string, phone: string, concept: string, balance: number) {
   const normalizedPhone = sanitizePhone(phone);
   if (!normalizedPhone) return null;
 
-  const periodsText = pendingPeriods.join(", ");
-  const message = `Hola ${studentName}, te escribimos desde el centro para recordarte que aun no registramos el pago del periodo ${periodsText}.`;
+  const message = `Hola ${studentName}, te escribimos desde el centro para recordarte que aun queda un saldo pendiente de $${balance} en ${concept}.`;
   return `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}`;
+}
+
+function normalizeFee(data: Omit<Fee, "id" | "paidAmount" | "balance" | "status"> & { paidAmount?: number; status?: string }) {
+  const amount = Number(data.amount || 0);
+  const paidAmount = normalizePaidAmount(amount, data.paidAmount ?? (data.status === "paid" ? amount : 0));
+  return {
+    ...data,
+    amount,
+    paidAmount,
+    balance: getFeeBalance(amount, paidAmount),
+    status: resolveFeeStatus({
+      amount,
+      paidAmount,
+      dueDate: data.dueDate
+    })
+  };
 }
 
 export function DebtPage() {
@@ -54,126 +60,176 @@ export function DebtPage() {
   const academyPath = membership ? `academies/${membership.academyId}` : null;
   const [students, setStudents] = useState<Student[]>([]);
   const [fees, setFees] = useState<Fee[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]);
 
   useEffect(() => {
     async function load() {
       if (isPreviewMode) {
         setStudents([
-          { id: "student-1", fullName: "Ana Perez", phone: "5491111111111" },
-          { id: "student-2", fullName: "Bruno Diaz", phone: "5492222222222" }
+          { id: "student-1", fullName: "Ana Perez", contactPhone: "5491111111111", status: "active" },
+          { id: "student-2", fullName: "Bruno Diaz", contactPhone: "5492222222222", status: "active" }
         ]);
         setFees([
-          { id: "fee-1", studentId: "student-1", concept: "Cuota mensual 03/2026", period: "2026-03", amount: 12000, status: "paid" },
-          { id: "fee-2", studentId: "student-2", concept: "Cuota mensual 03/2026", period: "2026-03", amount: 15000, status: "pending" }
-        ]);
-        setPayments([
-          { studentId: "student-1", amount: 12000 },
-          { studentId: "student-2", amount: 5000 }
+          {
+            id: "fee-1",
+            ...normalizeFee({
+              studentId: "student-1",
+              concept: "Cuota mensual 03/2026 - Freestyle",
+              period: "2026-03",
+              amount: 12000,
+              paidAmount: 2000,
+              dueDate: "2026-03-05",
+              disciplineName: "Freestyle"
+            })
+          },
+          {
+            id: "fee-2",
+            ...normalizeFee({
+              studentId: "student-2",
+              concept: "Cuota mensual 03/2026 - Breaking",
+              period: "2026-03",
+              amount: 15000,
+              paidAmount: 15000,
+              dueDate: "2026-03-09",
+              disciplineName: "Breaking"
+            })
+          }
         ]);
         return;
       }
       if (!academyPath) return;
-      const [studentsSnap, feesSnap, paymentsSnap] = await Promise.all([
-        getDocs(collection(db, `${academyPath}/students`)),
-        getDocs(collection(db, `${academyPath}/fees`)),
-        getDocs(collection(db, `${academyPath}/payments`))
+      const [studentsSnap, feesSnap] = await Promise.all([
+        getDocs(query(collection(db, `${academyPath}/students`), orderBy("fullName", "asc"))),
+        getDocs(query(collection(db, `${academyPath}/fees`), orderBy("dueDate", "asc")))
       ]);
       setStudents(
-        studentsSnap.docs.map((d) => ({
-          id: d.id,
-          fullName: String(d.data().fullName ?? "Alumno"),
-          phone: String(d.data().phone ?? "")
+        studentsSnap.docs.map((docSnap) => ({
+          id: docSnap.id,
+          fullName: String(docSnap.data().fullName ?? "Alumno"),
+          contactPhone: String(docSnap.data().contactPhone ?? docSnap.data().phone ?? ""),
+          status: (docSnap.data().status as Student["status"]) ?? "active"
         }))
       );
-      setFees(feesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Fee, "id">) })));
-      setPayments(paymentsSnap.docs.map((d) => d.data() as Payment));
+      setFees(
+        feesSnap.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...normalizeFee(docSnap.data() as Omit<Fee, "id">)
+        }))
+      );
     }
     void load();
   }, [academyPath, isPreviewMode]);
 
-  const allDebtRows = useMemo(() => {
-    return students
-      .map((student) => {
-        const studentFees = fees.filter((fee) => fee.studentId === student.id);
-        const totalFees = fees
-          .filter((fee) => fee.studentId === student.id)
-          .reduce((sum, fee) => sum + Number(fee.amount || 0), 0);
-        const totalPayments = payments
-          .filter((payment) => payment.studentId === student.id)
-          .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-        const debt = Math.max(0, totalFees - totalPayments);
-        const status = debt === 0 && totalFees > 0 ? "AL DIA" : totalPayments > 0 ? "PARCIAL" : "SIN PAGO";
-        const pendingPeriods = studentFees
-          .filter((fee) => String(fee.status ?? "").toLowerCase() !== "paid")
-          .map((fee) => formatPeriodLabel(fee.period, fee.concept, fee.dueDate));
-        const whatsappUrl = buildWhatsAppLink(student.fullName, student.phone, pendingPeriods);
+  const activeStudents = useMemo(() => students.filter((student) => student.status === "active"), [students]);
+  const activeStudentIds = useMemo(() => new Set(activeStudents.map((student) => student.id)), [activeStudents]);
+
+  const trackingRows = useMemo(() => {
+    return fees
+      .filter((fee) => activeStudentIds.has(fee.studentId))
+      .map((fee) => {
+        const student = activeStudents.find((item) => item.id === fee.studentId);
+        const daysLeft = diffDays(fee.dueDate);
+        const whatsappUrl =
+          fee.balance > 0 && student
+            ? buildWhatsAppLink(student.fullName, student.contactPhone, fee.disciplineName ?? fee.concept ?? "la cuota", fee.balance)
+            : null;
 
         return {
-          id: student.id,
-          student: student.fullName,
-          phone: student.phone,
-          totalFees,
-          totalPayments,
-          debt,
-          status,
-          pendingPeriods,
+          ...fee,
+          studentName: student?.fullName ?? fee.studentId,
+          phone: student?.contactPhone ?? "",
+          daysLeft,
           whatsappUrl
         };
       })
-      .sort((a, b) => b.debt - a.debt);
-  }, [students, fees, payments]);
+      .filter((fee) => fee.daysLeft <= 15)
+      .sort((a, b) => {
+        const aIsDebt = a.balance > 0;
+        const bIsDebt = b.balance > 0;
+        const aIsOverdueDebt = a.daysLeft < 0 && aIsDebt;
+        const bIsOverdueDebt = b.daysLeft < 0 && bIsDebt;
+        const aIsUpcomingDebt = a.daysLeft >= 0 && aIsDebt;
+        const bIsUpcomingDebt = b.daysLeft >= 0 && bIsDebt;
 
-  const debtRows = useMemo(() => allDebtRows.filter((row) => row.status === "SIN PAGO"), [allDebtRows]);
+        if (aIsOverdueDebt !== bIsOverdueDebt) return aIsOverdueDebt ? -1 : 1;
+        if (aIsUpcomingDebt !== bIsUpcomingDebt) return aIsUpcomingDebt ? -1 : 1;
+        return a.daysLeft - b.daysLeft;
+      });
+  }, [fees, activeStudentIds, activeStudents]);
 
   const totals = useMemo(() => {
-    const alDia = allDebtRows.filter((row) => row.status === "AL DIA").length;
-    const parcial = allDebtRows.filter((row) => row.status === "PARCIAL").length;
-    const sinPago = allDebtRows.filter((row) => row.status === "SIN PAGO").length;
-    const deudaTotal = allDebtRows.reduce((sum, row) => sum + row.debt, 0);
-    return { alDia, parcial, sinPago, deudaTotal };
-  }, [allDebtRows]);
+    const overdue = trackingRows.filter((row) => row.daysLeft < 0 && row.balance > 0).length;
+    const upcoming = trackingRows.filter((row) => row.daysLeft >= 0 && row.balance > 0).length;
+    const partial = trackingRows.filter((row) => row.status === "partial").length;
+    const pendingBalance = trackingRows.reduce((sum, row) => sum + row.balance, 0);
+    return { overdue, upcoming, partial, pendingBalance };
+  }, [trackingRows]);
 
   return (
-    <Panel title="Morosidad por alumno">
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
-        <Summary label="Al dia" value={totals.alDia} color="text-secondary" />
-        <Summary label="Parcial" value={totals.parcial} color="text-warning" />
-        <Summary label="Sin pago" value={totals.sinPago} color="text-danger" />
-        <Summary label="Deuda total" value={`$${totals.deudaTotal}`} color="text-danger" />
+    <Panel
+      title="Seguimiento de cobros"
+      action={
+        <Link
+          to="/app/fees"
+          className="rounded-brand border border-primary/40 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10"
+        >
+          Ir a cuotas
+        </Link>
+      }
+    >
+      <div className="mb-4 rounded-brand border border-warning/30 bg-warning/10 p-4 text-sm">
+        <p className="font-semibold text-text">Aqui ves lo que ya vencio y lo que esta por vencer dentro de los proximos 15 dias.</p>
+        <p className="mt-1 text-muted">
+          El orden prioriza primero las cuotas mas vencidas con saldo, luego las proximas a vencer y al final las que ya estan pagadas.
+        </p>
       </div>
+
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
+        <Summary label="Vencidas" value={totals.overdue} color="text-danger" />
+        <Summary label="Por vencer" value={totals.upcoming} color="text-warning" />
+        <Summary label="Parciales" value={totals.partial} color="text-primary" />
+        <Summary label="Saldo pendiente" value={`$${totals.pendingBalance}`} color="text-danger" />
+      </div>
+
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead className="text-left text-muted">
             <tr>
+              <th className="px-3 py-2">Prioridad</th>
               <th className="px-3 py-2">Alumno</th>
-              <th className="px-3 py-2">Periodos pendientes</th>
-              <th className="px-3 py-2">Facturado</th>
-              <th className="px-3 py-2">Pagado</th>
-              <th className="px-3 py-2">Deuda</th>
+              <th className="px-3 py-2">Concepto</th>
+              <th className="px-3 py-2">Total</th>
+              <th className="px-3 py-2">Entregado</th>
+              <th className="px-3 py-2">Saldo</th>
+              <th className="px-3 py-2">Vencimiento</th>
               <th className="px-3 py-2">Estado</th>
               <th className="px-3 py-2">WhatsApp</th>
             </tr>
           </thead>
           <tbody>
-            {debtRows.map((row) => (
+            {trackingRows.map((row) => (
               <tr key={row.id} className="border-t border-slate-800">
-                <td className="px-3 py-3">{row.student}</td>
-                <td className="px-3 py-3 text-muted">{row.pendingPeriods.join(", ") || "-"}</td>
-                <td className="px-3 py-3 text-warning">${row.totalFees}</td>
-                <td className="px-3 py-3 text-secondary">${row.totalPayments}</td>
-                <td className="px-3 py-3 font-semibold text-danger">${row.debt}</td>
+                <td className="px-3 py-3">
+                  <PriorityBadge daysLeft={row.daysLeft} />
+                </td>
+                <td className="px-3 py-3">{row.studentName}</td>
+                <td className="px-3 py-3 text-muted">{row.disciplineName ?? row.concept ?? "Cuota"}</td>
+                <td className="px-3 py-3 text-primary">${row.amount}</td>
+                <td className="px-3 py-3 text-secondary">${row.paidAmount}</td>
+                <td className="px-3 py-3 font-semibold text-warning">${row.balance}</td>
+                <td className="px-3 py-3 text-muted">{row.dueDate}</td>
                 <td className="px-3 py-3">
                   <span
-                    className={`rounded-brand px-2 py-1 text-xs ${
-                      row.status === "AL DIA"
+                    className={`rounded-brand px-2 py-1 text-xs font-semibold ${
+                      row.status === "paid"
                         ? "bg-secondary/15 text-secondary"
-                        : row.status === "PARCIAL"
-                          ? "bg-warning/15 text-warning"
-                          : "bg-danger/15 text-danger"
+                        : row.status === "overdue"
+                          ? "bg-danger/15 text-danger"
+                          : row.status === "partial"
+                            ? "bg-primary/15 text-primary"
+                            : "bg-warning/15 text-warning"
                     }`}
                   >
-                    {row.status}
+                    {formatMembershipStatus(row.status)}
                   </span>
                 </td>
                 <td className="px-3 py-3">
@@ -182,21 +238,21 @@ export function DebtPage() {
                       href={row.whatsappUrl}
                       target="_blank"
                       rel="noreferrer"
-                      aria-label={`Enviar WhatsApp a ${row.student}`}
+                      aria-label={`Enviar WhatsApp a ${row.studentName}`}
                       className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-secondary/15 text-secondary transition hover:bg-secondary/25"
                     >
                       <WhatsAppIcon />
                     </a>
                   ) : (
-                    <span className="text-xs text-muted">Sin telefono</span>
+                    <span className="text-xs text-muted">Sin aviso</span>
                   )}
                 </td>
               </tr>
             ))}
-            {debtRows.length === 0 && (
+            {trackingRows.length === 0 && (
               <tr>
-                <td className="px-3 py-3 text-muted" colSpan={7}>
-                  No hay alumnos en estado SIN PAGO.
+                <td className="px-3 py-3 text-muted" colSpan={9}>
+                  No hay cuotas para seguir dentro de los proximos 15 dias.
                 </td>
               </tr>
             )}
@@ -214,6 +270,19 @@ function Summary({ label, value, color }: { label: string; value: number | strin
       <p className={`mt-1 font-display text-xl ${color}`}>{value}</p>
     </div>
   );
+}
+
+function PriorityBadge({ daysLeft }: { daysLeft: number }) {
+  if (daysLeft < 0) {
+    return <span className="rounded-brand bg-danger/15 px-2 py-1 text-xs font-semibold text-danger">Vencida</span>;
+  }
+  if (daysLeft === 0) {
+    return <span className="rounded-brand bg-danger/15 px-2 py-1 text-xs font-semibold text-danger">Vence hoy</span>;
+  }
+  if (daysLeft <= 3) {
+    return <span className="rounded-brand bg-warning/15 px-2 py-1 text-xs font-semibold text-warning">{daysLeft} dias</span>;
+  }
+  return <span className="rounded-brand bg-primary/15 px-2 py-1 text-xs font-semibold text-primary">{daysLeft} dias</span>;
 }
 
 function WhatsAppIcon() {

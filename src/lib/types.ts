@@ -29,6 +29,7 @@ export interface Academy {
     uid: string;
     name: string;
     email: string;
+    phone?: string;
   };
   planLimits?: {
     maxStudents: number | null;
@@ -37,6 +38,22 @@ export interface Academy {
     students: number;
     fees: number;
     payments: number;
+  };
+  trial?: {
+    active?: boolean;
+    startedAt?: unknown;
+    endsAt?: unknown;
+  };
+  subscription?: {
+    active?: boolean;
+    mrr?: number;
+    billingStatus?: "paid" | "pending" | "overdue";
+    currentPeriod?: string;
+    dueDay?: number;
+    startedAt?: unknown;
+    renewsAt?: unknown;
+    lastPaidAt?: unknown;
+    amount?: number;
   };
   createdAt?: unknown;
 }

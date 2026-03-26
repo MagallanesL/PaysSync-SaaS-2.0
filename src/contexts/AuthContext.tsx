@@ -8,6 +8,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
@@ -20,6 +21,8 @@ import {
   type ReactNode
 } from "react";
 import { auth, db } from "../lib/firebase";
+import { DEFAULT_PLATFORM_CONFIG, normalizePlatformConfig } from "../lib/plans";
+import { isTrialExpired } from "../lib/trial";
 import type { AcademyMembership, UserProfile } from "../lib/types";
 
 interface AuthContextValue {
@@ -55,6 +58,8 @@ function isMembershipActive(status: unknown) {
 
 async function loadActiveMembership(uid: string, email?: string): Promise<AcademyMembership | null> {
   const normalizedEmail = email?.toLowerCase().trim();
+  const configSnap = await getDoc(doc(db, "platform", "config"));
+  const platformConfig = normalizePlatformConfig(configSnap.exists() ? configSnap.data() : DEFAULT_PLATFORM_CONFIG);
 
   const ownerByUidQuery = query(collection(db, "academies"), where("owner.uid", "==", uid), limit(5));
   const ownerByUidSnap = await getDocs(ownerByUidQuery);
@@ -68,6 +73,25 @@ async function loadActiveMembership(uid: string, email?: string): Promise<Academ
 
   if (ownerAcademyDoc) {
     const ownerData = ownerAcademyDoc.data() as Record<string, unknown>;
+    const ownerAcademy = ownerData as {
+      createdAt?: unknown;
+      trial?: { active?: boolean; startedAt?: unknown; endsAt?: unknown };
+    };
+    if (
+      String(ownerData.status ?? "").toLowerCase() === "trial" &&
+      isTrialExpired(ownerAcademy, platformConfig.trialDurationDays)
+    ) {
+      await updateDoc(doc(db, "academies", ownerAcademyDoc.id), {
+        status: "suspended",
+        trial: {
+          ...(ownerData.trial as Record<string, unknown> | undefined),
+          active: false
+        },
+        updatedAt: serverTimestamp()
+      });
+      return null;
+    }
+
     await setDoc(
       doc(db, `academies/${ownerAcademyDoc.id}/users/${uid}`),
       {
@@ -112,9 +136,29 @@ async function loadActiveMembership(uid: string, email?: string): Promise<Academ
   if (!academyRef) return null;
   const academySnap = await getDoc(academyRef);
   if (!academySnap.exists()) return null;
-  const academyStatus = academySnap.data().status as string | undefined;
+  const academyData = academySnap.data() as Record<string, unknown>;
+  const academyTrialData = academyData as {
+    createdAt?: unknown;
+    trial?: { active?: boolean; startedAt?: unknown; endsAt?: unknown };
+  };
+  if (
+    String(academyData.status ?? "").toLowerCase() === "trial" &&
+    isTrialExpired(academyTrialData, platformConfig.trialDurationDays)
+  ) {
+    await updateDoc(academyRef, {
+      status: "suspended",
+      trial: {
+        ...(academyData.trial as Record<string, unknown> | undefined),
+        active: false
+      },
+      updatedAt: serverTimestamp()
+    });
+    return null;
+  }
+
+  const academyStatus = academyData.status as string | undefined;
   if (academyStatus === "suspended") return null;
-  const academyName = academySnap.exists() ? (academySnap.data().name as string) : academyRef.id;
+  const academyName = academySnap.exists() ? (academyData.name as string) : academyRef.id;
 
   return {
     academyId: academyRef.id,

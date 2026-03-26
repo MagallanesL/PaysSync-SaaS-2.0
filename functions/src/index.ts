@@ -11,6 +11,9 @@ const adminAuth = getAuth();
 
 type Plan = "basic" | "pro" | "premium";
 type AcademyRole = "owner" | "staff" | "viewer";
+type PlanSettings = {
+  maxStudents: number | null;
+};
 
 interface CreateAcademyPayload {
   academyName: string;
@@ -19,6 +22,11 @@ interface CreateAcademyPayload {
   ownerEmail: string;
   ownerRole: AcademyRole;
   password?: string;
+}
+
+interface PlatformSettings {
+  trialDurationDays: number;
+  plans: Record<Plan, PlanSettings>;
 }
 
 function slugify(value: string) {
@@ -43,6 +51,61 @@ function maxStudentsByPlan(plan: Plan): number | null {
   if (plan === "basic") return 50;
   if (plan === "pro") return 100;
   return null;
+}
+
+function defaultPlatformSettings(): PlatformSettings {
+  return {
+    trialDurationDays: 15,
+    plans: {
+      basic: { maxStudents: 50 },
+      pro: { maxStudents: 100 },
+      premium: { maxStudents: null }
+    }
+  };
+}
+
+async function loadPlatformSettings(): Promise<PlatformSettings> {
+  const defaults = defaultPlatformSettings();
+  const configSnap = await db.doc("platform/config").get();
+  if (!configSnap.exists) return defaults;
+
+  const data = configSnap.data() as {
+    trialDurationDays?: unknown;
+    plans?: Partial<Record<Plan, { maxStudents?: unknown }>>;
+  };
+
+  return {
+    trialDurationDays:
+      typeof data.trialDurationDays === "number" && Number.isFinite(data.trialDurationDays)
+        ? Math.max(1, Math.round(data.trialDurationDays))
+        : defaults.trialDurationDays,
+    plans: {
+      basic: {
+        maxStudents:
+          data.plans?.basic?.maxStudents === null
+            ? null
+            : typeof data.plans?.basic?.maxStudents === "number"
+              ? Math.max(1, Math.round(data.plans.basic.maxStudents))
+              : defaults.plans.basic.maxStudents
+      },
+      pro: {
+        maxStudents:
+          data.plans?.pro?.maxStudents === null
+            ? null
+            : typeof data.plans?.pro?.maxStudents === "number"
+              ? Math.max(1, Math.round(data.plans.pro.maxStudents))
+              : defaults.plans.pro.maxStudents
+      },
+      premium: {
+        maxStudents:
+          data.plans?.premium?.maxStudents === null
+            ? null
+            : typeof data.plans?.premium?.maxStudents === "number"
+              ? Math.max(1, Math.round(data.plans.premium.maxStudents))
+              : defaults.plans.premium.maxStudents
+      }
+    }
+  };
 }
 
 function validatePayload(data: unknown): CreateAcademyPayload {
@@ -149,8 +212,11 @@ export const createAcademyWithOwner = onCall(callableOptions, async (request) =>
   const academyRef = db.collection("academies").doc();
   const slugBase = slugify(payload.academyName);
   const slug = `${slugBase}-${academyRef.id.slice(0, 6)}`;
+  const platformSettings = await loadPlatformSettings();
   const now = Timestamp.now();
-  const trialEndsAt = Timestamp.fromMillis(now.toMillis() + 14 * 24 * 60 * 60 * 1000);
+  const trialEndsAt = Timestamp.fromMillis(
+    now.toMillis() + platformSettings.trialDurationDays * 24 * 60 * 60 * 1000
+  );
 
   const batch = db.batch();
   batch.set(
@@ -176,7 +242,7 @@ export const createAcademyWithOwner = onCall(callableOptions, async (request) =>
       email: payload.ownerEmail
     },
     planLimits: {
-      maxStudents: maxStudentsByPlan(payload.plan)
+      maxStudents: platformSettings.plans[payload.plan].maxStudents ?? maxStudentsByPlan(payload.plan)
     },
     counters: {
       students: 0,

@@ -1,15 +1,13 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import { formatAcademyRole } from "../../lib/display";
 
 const navItems = [
   { to: "/app/dashboard", label: "Resumen" },
   { to: "/app/students", label: "Alumnos" },
   { to: "/app/disciplinas", label: "Disciplinas" },
   { to: "/app/fees", label: "Cuotas" },
-  { to: "/app/payments", label: "Pagos" },
-  { to: "/app/debt", label: "Morosidad" },
-  { to: "/app/users", label: "Equipo" },
-  { to: "/app/settings", label: "Centro" }
+  { to: "/app/settings", label: "Configuracion" }
 ];
 
 export function AppShell() {
@@ -43,7 +41,7 @@ export function AppShell() {
             <div>
               <p className="text-sm text-muted">Panel del centro</p>
               <p className="text-sm">
-                {profile?.displayName} · <span className="uppercase text-primary">{membership?.role}</span>
+                {profile?.displayName} | <span className="uppercase text-primary">{formatAcademyRole(membership?.role ?? "viewer")}</span>
               </p>
             </div>
             <button

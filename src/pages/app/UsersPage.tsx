@@ -15,6 +15,7 @@ import {
 import { useEffect, useState, type FormEvent } from "react";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
+import { formatAcademyRole, formatMembershipStatus } from "../../lib/display";
 import { db, getSecondaryAuth, getSecondaryDb } from "../../lib/firebase";
 import type { AcademyRole } from "../../lib/types";
 
@@ -155,7 +156,7 @@ export function UsersPage() {
     }
 
     if (!canManageUsers) {
-      setError("Solo el owner puede crear usuarios desde este panel.");
+      setError("Solo el propietario puede crear usuarios desde este panel.");
       return;
     }
 
@@ -276,8 +277,8 @@ export function UsersPage() {
                       <td className="px-3 py-3 text-muted">{user.id}</td>
                       <td className="px-3 py-3">{user.displayName ?? "-"}</td>
                       <td className="px-3 py-3">{user.email}</td>
-                      <td className="px-3 py-3 uppercase text-primary">{user.role}</td>
-                      <td className="px-3 py-3 uppercase text-muted">{user.status}</td>
+                      <td className="px-3 py-3 uppercase text-primary">{formatAcademyRole(user.role)}</td>
+                      <td className="px-3 py-3 uppercase text-muted">{formatMembershipStatus(user.status)}</td>
                     </tr>
                   ))
                 )}
@@ -330,8 +331,8 @@ export function UsersPage() {
             </form>
           ) : (
             <div className="space-y-2 text-sm text-muted">
-              <p>Solo el owner puede dar de alta usuarios desde este panel.</p>
-              <p>Tu rol actual es {membership?.role?.toUpperCase() ?? "N/A"}.</p>
+              <p>Solo el propietario puede dar de alta usuarios desde este panel.</p>
+              <p>Tu rol actual es {formatAcademyRole(membership?.role ?? "viewer").toUpperCase()}.</p>
             </div>
           )}
         </Panel>
@@ -388,7 +389,7 @@ function Select({
       >
         {options.map((option) => (
           <option key={option} value={option}>
-            {option}
+            {formatAcademyRole(option)}
           </option>
         ))}
       </select>

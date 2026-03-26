@@ -1,273 +1,226 @@
-﻿import {
-  addDoc,
-  collection,
-  doc,
-  getDocs,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc
-} from "firebase/firestore";
-import { useEffect, useState, type FormEvent } from "react";
+import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+import { formatMembershipStatus } from "../../lib/display";
 import { db } from "../../lib/firebase";
 import { Panel } from "../../components/ui/Panel";
+import { diffDays, getFeeBalance, normalizePaidAmount, resolveFeeStatus, type FeeStatus } from "../../lib/fees";
 
 interface StudentOption {
   id: string;
   fullName: string;
+  status: "active" | "inactive";
 }
 
-interface FeeOption {
-  id: string;
-  concept: string;
-}
-
-function formatFeeLabel(data: Record<string, unknown>) {
-  const concept = String(data.concept ?? "").trim();
-  if (concept) return concept;
-
-  const category = String(data.category ?? "").trim();
-  const period = String(data.period ?? "").trim();
-  const observation = String(data.observation ?? "").trim();
-
-  if (category === "monthly_fee" && period) {
-    const [year, month] = period.split("-");
-    const periodLabel = year && month ? `${month}/${year}` : period;
-    return observation ? `Cuota mensual ${periodLabel} - ${observation}` : `Cuota mensual ${periodLabel}`;
-  }
-
-  if (observation) return observation;
-  if (category) return category;
-  return "Cuota";
-}
-
-interface Payment {
+interface Fee {
   id: string;
   studentId: string;
-  feeId: string;
+  concept: string;
+  disciplineName?: string;
   amount: number;
-  paymentDate: string;
-  method: string;
+  paidAmount: number;
+  balance: number;
+  dueDate: string;
+  status: FeeStatus;
 }
 
-const emptyForm = {
-  studentId: "",
-  feeId: "",
-  amount: "",
-  paymentDate: "",
-  method: "cash"
-};
+function normalizeFee(data: Omit<Fee, "id" | "paidAmount" | "balance" | "status"> & { paidAmount?: number; status?: string }) {
+  const amount = Number(data.amount || 0);
+  const paidAmount = normalizePaidAmount(amount, data.paidAmount ?? (data.status === "paid" ? amount : 0));
+  return {
+    ...data,
+    amount,
+    paidAmount,
+    balance: getFeeBalance(amount, paidAmount),
+    status: resolveFeeStatus({
+      amount,
+      paidAmount,
+      dueDate: data.dueDate
+    })
+  };
+}
 
 export function PaymentsPage() {
-  const { membership, canWriteAcademyData, isPreviewMode } = useAuth();
+  const { membership, isPreviewMode } = useAuth();
   const academyPath = membership ? `academies/${membership.academyId}` : null;
-  const [payments, setPayments] = useState<Payment[]>([]);
   const [students, setStudents] = useState<StudentOption[]>([]);
-  const [fees, setFees] = useState<FeeOption[]>([]);
-  const [form, setForm] = useState(emptyForm);
-
-  async function loadData() {
-    if (isPreviewMode) {
-      setStudents([
-        { id: "student-1", fullName: "Ana Perez" },
-        { id: "student-2", fullName: "Bruno Diaz" }
-      ]);
-      setFees([
-        { id: "fee-1", concept: "Cuota mensual 03/2026" },
-        { id: "fee-2", concept: "Indumentaria - Zapatillas" }
-      ]);
-      setPayments([
-        {
-          id: "payment-1",
-          studentId: "student-1",
-          feeId: "fee-1",
-          amount: 12000,
-          paymentDate: "2026-03-01",
-          method: "transfer"
-        }
-      ]);
-      return;
-    }
-    if (!academyPath) return;
-    const [studentsSnap, feesSnap, paymentsSnap] = await Promise.all([
-      getDocs(query(collection(db, `${academyPath}/students`), orderBy("fullName", "asc"))),
-      getDocs(query(collection(db, `${academyPath}/fees`), orderBy("dueDate", "desc"))),
-      getDocs(query(collection(db, `${academyPath}/payments`), orderBy("paymentDate", "desc")))
-    ]);
-    setStudents(studentsSnap.docs.map((d) => ({ id: d.id, fullName: d.data().fullName as string })));
-    setFees(feesSnap.docs.map((d) => ({ id: d.id, concept: formatFeeLabel(d.data() as Record<string, unknown>) })));
-    setPayments(paymentsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Payment, "id">) })));
-  }
+  const [fees, setFees] = useState<Fee[]>([]);
 
   useEffect(() => {
+    async function loadData() {
+      if (isPreviewMode) {
+        setStudents([
+          { id: "student-1", fullName: "Ana Perez", status: "active" },
+          { id: "student-2", fullName: "Bruno Diaz", status: "active" }
+        ]);
+        setFees([
+          {
+            id: "fee-1",
+            ...normalizeFee({
+              studentId: "student-1",
+              concept: "Cuota mensual 03/2026 - Freestyle",
+              disciplineName: "Freestyle",
+              amount: 20000,
+              paidAmount: 10000,
+              dueDate: "2026-03-08"
+            })
+          },
+          {
+            id: "fee-2",
+            ...normalizeFee({
+              studentId: "student-2",
+              concept: "Cuota mensual 03/2026 - Breaking",
+              disciplineName: "Breaking",
+              amount: 18000,
+              paidAmount: 0,
+              dueDate: "2026-03-03"
+            })
+          }
+        ]);
+        return;
+      }
+
+      if (!academyPath) return;
+      const [studentsSnap, feesSnap] = await Promise.all([
+        getDocs(query(collection(db, `${academyPath}/students`), orderBy("fullName", "asc"))),
+        getDocs(query(collection(db, `${academyPath}/fees`), orderBy("dueDate", "asc")))
+      ]);
+
+      setStudents(
+        studentsSnap.docs.map((docSnap) => ({
+          id: docSnap.id,
+          fullName: String(docSnap.data().fullName ?? "Alumno"),
+          status: (docSnap.data().status as StudentOption["status"]) ?? "active"
+        }))
+      );
+      setFees(
+        feesSnap.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...normalizeFee(docSnap.data() as Omit<Fee, "id">)
+        }))
+      );
+    }
+
     void loadData();
   }, [academyPath, isPreviewMode]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!canWriteAcademyData || !academyPath || isPreviewMode) return;
+  const urgentFees = useMemo(() => {
+    return fees
+      .filter((fee) => {
+        const student = students.find((item) => item.id === fee.studentId);
+        if (!student || student.status !== "active") return false;
+        const daysLeft = diffDays(fee.dueDate);
+        return daysLeft <= 15;
+      })
+      .map((fee) => {
+        const student = students.find((item) => item.id === fee.studentId);
+        const daysLeft = diffDays(fee.dueDate);
+        return {
+          ...fee,
+          studentName: student?.fullName ?? fee.studentId,
+          daysLeft
+        };
+      })
+      .sort((a, b) => {
+        const aIsDebt = a.balance > 0;
+        const bIsDebt = b.balance > 0;
+        const aIsOverdueDebt = a.daysLeft < 0 && aIsDebt;
+        const bIsOverdueDebt = b.daysLeft < 0 && bIsDebt;
+        const aIsUpcomingDebt = a.daysLeft >= 0 && aIsDebt;
+        const bIsUpcomingDebt = b.daysLeft >= 0 && bIsDebt;
 
-    const payload = {
-      studentId: form.studentId,
-      feeId: form.feeId || "",
-      amount: Number(form.amount),
-      paymentDate: form.paymentDate,
-      method: form.method,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    };
-
-    await addDoc(collection(db, `${academyPath}/payments`), payload);
-    if (form.feeId) {
-      await updateDoc(doc(db, `${academyPath}/fees`, form.feeId), {
-        status: "paid",
-        updatedAt: serverTimestamp()
+        if (aIsOverdueDebt !== bIsOverdueDebt) return aIsOverdueDebt ? -1 : 1;
+        if (aIsUpcomingDebt !== bIsUpcomingDebt) return aIsUpcomingDebt ? -1 : 1;
+        return a.daysLeft - b.daysLeft;
       });
-    }
-    setForm(emptyForm);
-    await loadData();
+  }, [fees, students]);
+
+  return (
+    <Panel
+      title="Vencimientos"
+      action={
+        <Link
+          to="/app/fees"
+          className="rounded-brand border border-primary/40 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10"
+        >
+          Ir a cuotas
+        </Link>
+      }
+    >
+      <div className="mb-4 rounded-brand border border-warning/30 bg-warning/10 p-4 text-sm">
+        <p className="font-semibold text-text">Se muestran cuotas que ya vencieron o vencen en los proximos 15 dias.</p>
+        <p className="mt-1 text-muted">
+          El orden prioriza primero las cuotas mas vencidas con saldo, luego las proximas a vencer y al final las que ya estan pagadas.
+        </p>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="text-left text-muted">
+            <tr>
+              <th className="px-3 py-2">Prioridad</th>
+              <th className="px-3 py-2">Alumno</th>
+              <th className="px-3 py-2">Concepto</th>
+              <th className="px-3 py-2">Total</th>
+              <th className="px-3 py-2">Entregado</th>
+              <th className="px-3 py-2">Saldo</th>
+              <th className="px-3 py-2">Vencimiento</th>
+              <th className="px-3 py-2">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {urgentFees.map((fee) => (
+              <tr key={fee.id} className="border-t border-slate-800">
+                <td className="px-3 py-3">
+                  <PriorityBadge daysLeft={fee.daysLeft} />
+                </td>
+                <td className="px-3 py-3">{fee.studentName}</td>
+                <td className="px-3 py-3 text-muted">{fee.disciplineName ?? fee.concept}</td>
+                <td className="px-3 py-3 text-primary">${fee.amount}</td>
+                <td className="px-3 py-3 text-secondary">${fee.paidAmount}</td>
+                <td className="px-3 py-3 font-semibold text-warning">${fee.balance}</td>
+                <td className="px-3 py-3 text-muted">{fee.dueDate}</td>
+                <td className="px-3 py-3">
+                  <span
+                    className={`rounded-brand px-2 py-1 text-xs font-semibold ${
+                      fee.status === "paid"
+                        ? "bg-secondary/15 text-secondary"
+                        : fee.status === "overdue"
+                        ? "bg-danger/15 text-danger"
+                        : fee.status === "partial"
+                          ? "bg-primary/15 text-primary"
+                          : "bg-warning/15 text-warning"
+                    }`}
+                  >
+                    {formatMembershipStatus(fee.status)}
+                  </span>
+                </td>
+              </tr>
+            ))}
+            {urgentFees.length === 0 && (
+              <tr>
+                <td className="px-3 py-4 text-muted" colSpan={8}>
+                  No hay cuotas urgentes para seguir hoy.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function PriorityBadge({ daysLeft }: { daysLeft: number }) {
+  if (daysLeft < 0) {
+    return <span className="rounded-brand bg-danger/15 px-2 py-1 text-xs font-semibold text-danger">Vencida</span>;
   }
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      <div className="lg:col-span-2">
-        <Panel title="Pagos">
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="text-left text-muted">
-                <tr>
-                  <th className="px-3 py-2">Alumno</th>
-                  <th className="px-3 py-2">Cuota</th>
-                  <th className="px-3 py-2">Monto</th>
-                  <th className="px-3 py-2">Fecha</th>
-                  <th className="px-3 py-2">Metodo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {payments.map((payment) => (
-                  <tr key={payment.id} className="border-t border-slate-800">
-                    <td className="px-3 py-3 text-muted">
-                      {students.find((student) => student.id === payment.studentId)?.fullName ?? payment.studentId}
-                    </td>
-                    <td className="px-3 py-3 text-muted">
-                      {payment.feeId ? fees.find((fee) => fee.id === payment.feeId)?.concept ?? payment.feeId : "-"}
-                    </td>
-                    <td className="px-3 py-3">${payment.amount}</td>
-                    <td className="px-3 py-3">{payment.paymentDate}</td>
-                    <td className="px-3 py-3 uppercase">
-                      {payment.method === "cash" ? "EFECTIVO" : payment.method === "transfer" ? "TRANSFERENCIA" : "TARJETA"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-      </div>
-      <div>
-        <Panel title="Registrar pago">
-          <form onSubmit={(e) => void handleSubmit(e)} className="grid gap-3 text-sm">
-            <Select
-              label="Alumno"
-              value={form.studentId}
-              onChange={(value) => setForm((prev) => ({ ...prev, studentId: value }))}
-              options={students.map((s) => ({ value: s.id, label: s.fullName }))}
-              required
-            />
-            <Select
-              label="Cuota (opcional)"
-              value={form.feeId}
-              onChange={(value) => setForm((prev) => ({ ...prev, feeId: value }))}
-              options={[
-                { value: "", label: "Sin cuota vinculada" },
-                ...fees.map((f) => ({ value: f.id, label: f.concept }))
-              ]}
-            />
-            <Field label="Monto" type="number" value={form.amount} onChange={(value) => setForm((prev) => ({ ...prev, amount: value }))} />
-            <Field
-              label="Fecha de pago"
-              type="date"
-              value={form.paymentDate}
-              onChange={(value) => setForm((prev) => ({ ...prev, paymentDate: value }))}
-            />
-            <Select
-              label="Metodo"
-              value={form.method}
-              onChange={(value) => setForm((prev) => ({ ...prev, method: value }))}
-              options={[
-                { value: "cash", label: "Efectivo" },
-                { value: "transfer", label: "Transferencia" },
-                { value: "card", label: "Tarjeta" }
-              ]}
-              required
-            />
-            <button
-              disabled={!canWriteAcademyData || isPreviewMode}
-              className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40"
-            >
-              {isPreviewMode ? "Modo demo" : "Registrar pago"}
-            </button>
-          </form>
-        </Panel>
-      </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  type = "text"
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-}) {
-  return (
-    <label className="grid gap-1">
-      {label}
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
-        required
-      />
-    </label>
-  );
-}
-
-function Select({
-  label,
-  value,
-  onChange,
-  options,
-  required
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ value: string; label: string }>;
-  required?: boolean;
-}) {
-  return (
-    <label className="grid gap-1">
-      {label}
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
-        required={required}
-      >
-        {options.map((option) => (
-          <option key={option.value || "blank"} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
+  if (daysLeft === 0) {
+    return <span className="rounded-brand bg-danger/15 px-2 py-1 text-xs font-semibold text-danger">Vence hoy</span>;
+  }
+  if (daysLeft <= 3) {
+    return <span className="rounded-brand bg-warning/15 px-2 py-1 text-xs font-semibold text-warning">{daysLeft} dias</span>;
+  }
+  return <span className="rounded-brand bg-primary/15 px-2 py-1 text-xs font-semibold text-primary">{daysLeft} dias</span>;
 }
