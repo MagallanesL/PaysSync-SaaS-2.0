@@ -16,16 +16,16 @@ export function AppShell() {
   return (
     <div className="min-h-screen bg-bg text-text">
       <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 md:flex-row md:px-6">
-        <aside className="rounded-brand border border-slate-700/80 bg-surface p-4 shadow-soft md:w-64">
+        <aside className="rounded-brand border border-slate-700/80 bg-surface p-4 shadow-soft md:w-64 md:shrink-0">
           <p className="font-display text-xl text-primary">PaySync</p>
           <p className="mt-1 text-xs text-muted">{membership?.academyName ?? "Centro"}</p>
-          <nav className="mt-5 grid gap-1">
+          <nav className="mt-5 flex gap-2 overflow-x-auto pb-1 md:grid md:gap-1 md:overflow-visible md:pb-0">
             {navItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
                 className={({ isActive }) =>
-                  `rounded-brand px-3 py-2 text-sm transition ${
+                  `shrink-0 whitespace-nowrap rounded-brand px-3 py-2 text-sm transition md:shrink md:whitespace-normal ${
                     isActive ? "bg-primary/15 text-primary" : "text-muted hover:bg-slate-700/40 hover:text-text"
                   }`
                 }
@@ -37,16 +37,16 @@ export function AppShell() {
         </aside>
 
         <main className="flex-1">
-          <header className="mb-4 flex items-center justify-between rounded-brand border border-slate-700/80 bg-surface px-4 py-3 shadow-soft">
-            <div>
+          <header className="mb-4 flex flex-col gap-3 rounded-brand border border-slate-700/80 bg-surface px-4 py-3 shadow-soft sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <p className="text-sm text-muted">Panel del centro</p>
-              <p className="text-sm">
+              <p className="text-sm break-words">
                 {profile?.displayName} | <span className="uppercase text-primary">{formatAcademyRole(membership?.role ?? "viewer")}</span>
               </p>
             </div>
             <button
               onClick={() => void logout()}
-              className="rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary"
+              className="w-full rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary sm:w-auto"
             >
               Cerrar sesion
             </button>
