@@ -14,8 +14,8 @@ export function AppShell() {
   const { membership, profile, logout } = useAuth();
 
   return (
-    <div className="min-h-screen bg-bg text-text">
-      <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 md:flex-row md:px-6">
+    <div className="min-h-screen overflow-x-hidden bg-bg text-text">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-4 sm:px-4 md:flex-row md:px-6">
         <aside className="rounded-brand border border-slate-700/80 bg-surface p-4 shadow-soft md:w-64 md:shrink-0">
           <p className="font-display text-xl text-primary">PaySync</p>
           <p className="mt-1 text-xs text-muted">{membership?.academyName ?? "Centro"}</p>
@@ -36,7 +36,7 @@ export function AppShell() {
           </nav>
         </aside>
 
-        <main className="flex-1">
+        <main className="min-w-0 flex-1">
           <header className="mb-4 flex flex-col gap-3 rounded-brand border border-slate-700/80 bg-surface px-4 py-3 shadow-soft sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <p className="text-sm text-muted">Panel del centro</p>

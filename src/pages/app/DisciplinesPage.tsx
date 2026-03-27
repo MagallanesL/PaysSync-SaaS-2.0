@@ -207,7 +207,55 @@ export function DisciplinesPage() {
           </button>
         }
       >
-        <div className="overflow-x-auto">
+        <div className="space-y-3 md:hidden">
+          {disciplines.map((discipline) => (
+            <article
+              key={discipline.id}
+              className={`rounded-brand border border-slate-800 bg-bg p-4 ${discipline.active ? "" : "opacity-80"}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-text">{discipline.name}</p>
+                  <p className="text-sm text-muted">{categoryLabels[discipline.billingType]}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleToggleStatus(discipline)}
+                  disabled={!canWriteAcademyData || isPreviewMode}
+                  className={`shrink-0 rounded-brand px-2 py-1 text-xs font-semibold transition disabled:opacity-40 ${
+                    discipline.active
+                      ? "bg-secondary/15 text-secondary hover:bg-secondary/25"
+                      : "bg-danger/15 text-danger hover:bg-danger/25"
+                  }`}
+                >
+                  {discipline.active ? "Activa" : "Inactiva"}
+                </button>
+              </div>
+
+              <div className="mt-3 grid gap-2 text-sm text-muted">
+                <MobileInfo
+                  label="Modalidad"
+                  value={paymentModeLabels[discipline.paymentMode ?? (discipline.billingType === "monthly_fee" ? "monthly" : "one_time")]}
+                />
+                <MobileInfo label="Valor base" value={`$${discipline.price}`} />
+                <MobileInfo label="Pagos" value={discipline.allowPartial ? "Permite entregas" : "Pago completo"} />
+              </div>
+
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => handleEdit(discipline)}
+                  disabled={!canWriteAcademyData || isPreviewMode}
+                  className="w-full rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
+                >
+                  Editar
+                </button>
+              </div>
+            </article>
+          ))}
+          {disciplines.length === 0 && <p className="text-sm text-muted">Todavia no hay disciplinas cargadas.</p>}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
           <table className="min-w-full text-sm">
             <thead className="text-left text-muted">
               <tr>
@@ -376,6 +424,15 @@ export function DisciplinesPage() {
         </div>
       )}
     </>
+  );
+}
+
+function MobileInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-1">
+      <p className="text-[11px] uppercase tracking-wide text-muted">{label}</p>
+      <p className="break-words text-text">{value}</p>
+    </div>
   );
 }
 
