@@ -1,6 +1,7 @@
 import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { AuthEntryPanel } from "../components/auth/AuthEntryPanel";
 import {
   DEFAULT_PLATFORM_CONFIG,
   formatPlanLimitValue,
@@ -76,6 +77,7 @@ function getPlanCardClass(plan: AcademyPlan) {
 
 export function MarketingLandingPage() {
   const [config, setConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
+  const [authModalMode, setAuthModalMode] = useState<"login" | "register" | null>(null);
 
   useEffect(() => {
     async function loadPlatformConfig() {
@@ -89,6 +91,13 @@ export function MarketingLandingPage() {
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[#0B1020] text-[#F9FAFB]">
       <div className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[760px] bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.16),transparent_28%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_26%)]" />
+      {authModalMode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/82 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-6xl">
+            <AuthEntryPanel initialMode={authModalMode} embedded onRequestClose={() => setAuthModalMode(null)} />
+          </div>
+        </div>
+      )}
 
       <section className="mx-auto max-w-7xl px-4 pt-5 sm:px-6 sm:pt-6 lg:px-8">
         <header className="flex flex-col gap-4 rounded-[20px] border border-[#1F2937] bg-[rgba(17,24,39,0.82)] px-4 py-4 backdrop-blur sm:px-5 md:flex-row md:items-center md:justify-between">
@@ -106,18 +115,20 @@ export function MarketingLandingPage() {
                 Planes
               </a>
             </div>
-            <Link
-              to="/login"
+            <button
+              type="button"
+              onClick={() => setAuthModalMode("login")}
               className="inline-flex min-h-11 items-center justify-center rounded-[14px] border border-[#1F2937] px-4 py-2 font-medium text-[#F9FAFB] transition hover:border-[#38BDF8] hover:text-[#38BDF8]"
             >
               Ingresar
-            </Link>
-            <Link
-              to="/register"
+            </button>
+            <button
+              type="button"
+              onClick={() => setAuthModalMode("register")}
               className="inline-flex min-h-11 items-center justify-center rounded-[14px] bg-[#10B981] px-4 py-2 font-semibold text-[#0B1020] transition hover:brightness-110"
             >
               Solicitar demo
-            </Link>
+            </button>
           </nav>
         </header>
       </section>
@@ -138,12 +149,13 @@ export function MarketingLandingPage() {
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-            <Link
-              to="/register"
+            <button
+              type="button"
+              onClick={() => setAuthModalMode("register")}
               className="inline-flex min-h-12 items-center justify-center rounded-[16px] bg-[#10B981] px-5 py-3 text-sm font-semibold text-[#0B1020] transition hover:brightness-110 sm:min-w-[180px]"
             >
               Solicitar demo
-            </Link>
+            </button>
             <a
               href="#como-funciona"
               className="inline-flex min-h-12 items-center justify-center rounded-[16px] border border-[#1F2937] bg-[#111827] px-5 py-3 text-sm font-semibold text-[#F9FAFB] transition hover:border-[#38BDF8] hover:text-[#38BDF8] sm:min-w-[180px]"
@@ -212,16 +224,41 @@ export function MarketingLandingPage() {
       </section>
 
       <section id="como-funciona" className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-16">
-        <SectionHeader
-          eyebrow="La solucion"
-          title="PaySync ordena tu gestion mensual en pocos pasos."
-          description="Sin vueltas tecnicas. Solo una forma mas clara de administrar alumnos, cuotas y pagos."
-        />
+        <div className="overflow-hidden rounded-[26px] border border-[#1F2937] bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(17,24,39,0.98))] p-5 shadow-[0_24px_70px_rgba(2,6,23,0.32)] sm:rounded-[30px] sm:p-6 lg:p-8">
+          <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
+            <div>
+              <div className="inline-flex rounded-full border border-[#10B981]/25 bg-[#10B981]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-[#10B981]">
+                Como funciona
+              </div>
+              <h2 className="mt-4 font-display text-[2rem] leading-tight text-[#F9FAFB] sm:text-[2.4rem]">
+                Cobras mejor cuando todo el mes se ve claro desde el primer dia.
+              </h2>
+              <p className="mt-4 max-w-xl text-base leading-7 text-[#94A3B8]">
+                PaySync te guia en un flujo simple para ordenar alumnos, cuotas y estados de pago sin depender de Excel, cuadernos ni chats.
+              </p>
 
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {workflowSteps.map((step, index) => (
-            <StepCard key={step} step={`Paso ${index + 1}`} detail={step} />
-          ))}
+              <div className="mt-6 grid gap-3">
+                <HighlightRow
+                  title="Alta rapida"
+                  detail="Registras tu centro, eliges plan y entras con prueba gratis sin una implementacion larga."
+                />
+                <HighlightRow
+                  title="Seguimiento mensual"
+                  detail="Ves pagos, pendientes y vencimientos en una sola vista para actuar rapido."
+                />
+                <HighlightRow
+                  title="Mas orden, menos friccion"
+                  detail="Tu operacion diaria queda mas prolija y mas facil de sostener a medida que creces."
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              {workflowSteps.map((step, index) => (
+                <StepCard key={step} step={`Paso ${index + 1}`} detail={step} />
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -273,8 +310,9 @@ export function MarketingLandingPage() {
                   {getPlanHighlight(config, plan)}
                 </div>
 
-                <Link
-                  to="/register"
+                <button
+                  type="button"
+                  onClick={() => setAuthModalMode("register")}
                   className={`mt-6 inline-flex min-h-12 w-full items-center justify-center rounded-[16px] px-4 py-3 text-sm font-semibold transition ${
                     recommended
                       ? "bg-[#10B981] text-[#0B1020] hover:brightness-110"
@@ -282,7 +320,7 @@ export function MarketingLandingPage() {
                   }`}
                 >
                   Solicitar demo
-                </Link>
+                </button>
               </article>
             );
           })}
@@ -334,17 +372,24 @@ export function MarketingLandingPage() {
             Pedi una demo y conoce como PaySync puede ayudarte a cobrar mejor y administrar con mas claridad.
           </p>
           <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-            <Link
-              to="/register"
+            <button
+              type="button"
+              onClick={() => setAuthModalMode("register")}
               className="inline-flex min-h-12 items-center justify-center rounded-[16px] bg-[#10B981] px-5 py-3 text-sm font-semibold text-[#0B1020] transition hover:brightness-110 sm:min-w-[180px]"
             >
               Solicitar demo
-            </Link>
-            <Link
-              to="/login"
+            </button>
+            <button
+              type="button"
+              onClick={() => setAuthModalMode("login")}
               className="inline-flex min-h-12 items-center justify-center rounded-[16px] border border-[#1F2937] bg-[#0F172A] px-5 py-3 text-sm font-semibold text-[#F9FAFB] transition hover:border-[#38BDF8] hover:text-[#38BDF8] sm:min-w-[180px]"
             >
               Ingresar
+            </button>
+          </div>
+          <div className="mt-4 text-center text-sm text-muted">
+            <Link to="/login" className="transition hover:text-primary">
+              O abrir la pagina completa de acceso
             </Link>
           </div>
         </div>
@@ -439,6 +484,21 @@ function StepCard({
         {step}
       </div>
       <p className="text-sm leading-7 text-[#E5E7EB]">{detail}</p>
+    </div>
+  );
+}
+
+function HighlightRow({
+  title,
+  detail
+}: {
+  title: string;
+  detail: string;
+}) {
+  return (
+    <div className="rounded-[18px] border border-[#1F2937] bg-[#0F172A] p-4">
+      <p className="text-sm font-semibold text-[#F9FAFB]">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-[#94A3B8]">{detail}</p>
     </div>
   );
 }
