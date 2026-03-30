@@ -1,31 +1,55 @@
 import { FirebaseError } from "firebase/app";
 import { signInWithEmailAndPassword } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import creatingCenterVideo from "../asset/Gen-4 Turbo - Animate this exact image of many cute kittens building a giant mobile app like a const.mp4";
-import { auth, functions } from "../lib/firebase";
-
-type AcademyPlan = "basic" | "pro" | "premium";
+import { auth, db, functions } from "../lib/firebase";
+import {
+  DEFAULT_PLATFORM_CONFIG,
+  getPlanDescription,
+  getPlanLabel,
+  getPlanPrice,
+  normalizePlatformConfig,
+  type PlatformConfig
+} from "../lib/plans";
+import type { AcademyPlan } from "../lib/types";
 
 interface RegisterFormState {
   academyName: string;
   ownerName: string;
   ownerEmail: string;
+  ownerPhone: string;
   password: string;
   confirmPassword: string;
   plan: AcademyPlan;
 }
 
+const DEFAULT_OWNER_PHONE = "+54 9 ";
+
 const initialForm: RegisterFormState = {
   academyName: "",
   ownerName: "",
   ownerEmail: "",
+  ownerPhone: DEFAULT_OWNER_PHONE,
   password: "",
   confirmPassword: "",
   plan: "basic"
 };
+
+function normalizeOwnerPhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+  let localDigits = digits;
+
+  if (localDigits.startsWith("549")) localDigits = localDigits.slice(3);
+  else if (localDigits.startsWith("54")) localDigits = localDigits.slice(2);
+  else if (localDigits.startsWith("9")) localDigits = localDigits.slice(1);
+
+  const trimmedLocalDigits = localDigits.slice(0, 13);
+  return `${DEFAULT_OWNER_PHONE}${trimmedLocalDigits}`.trimEnd();
+}
 
 function getRegisterErrorMessage(error: unknown) {
   if (error instanceof FirebaseError) {
@@ -54,6 +78,7 @@ export function RegisterAcademyPage() {
   const navigate = useNavigate();
   const { firebaseUser, isRoot, membership, loading, isPreviewMode } = useAuth();
   const [form, setForm] = useState<RegisterFormState>(initialForm);
+  const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -64,6 +89,7 @@ export function RegisterAcademyPage() {
           academyName: string;
           ownerName: string;
           ownerEmail: string;
+          ownerPhone: string;
           password: string;
           plan: AcademyPlan;
         },
@@ -75,6 +101,15 @@ export function RegisterAcademyPage() {
       >(functions, "registerAcademy"),
     []
   );
+
+  useEffect(() => {
+    async function loadPlatformConfig() {
+      const configSnap = await getDoc(doc(db, "platform", "config"));
+      setPlatformConfig(normalizePlatformConfig(configSnap.exists() ? configSnap.data() : undefined));
+    }
+
+    void loadPlatformConfig();
+  }, []);
 
   if (isPreviewMode) {
     return <Navigate to="/app/dashboard" replace />;
@@ -95,6 +130,8 @@ export function RegisterAcademyPage() {
     const academyName = form.academyName.trim();
     const ownerName = form.ownerName.trim();
     const ownerEmail = form.ownerEmail.trim().toLowerCase();
+    const ownerPhone = normalizeOwnerPhone(form.ownerPhone);
+    const ownerPhoneDigits = ownerPhone.replace(/\D/g, "");
 
     if (!academyName || !ownerName || !ownerEmail || !form.password.trim()) {
       setSubmitting(false);
@@ -105,6 +142,12 @@ export function RegisterAcademyPage() {
     if (!/^\S+@\S+\.\S+$/.test(ownerEmail)) {
       setSubmitting(false);
       setError("El email no tiene un formato valido.");
+      return;
+    }
+
+    if (ownerPhoneDigits.length <= 3) {
+      setSubmitting(false);
+      setError("Ingresa un numero de WhatsApp valido para el owner.");
       return;
     }
 
@@ -125,6 +168,7 @@ export function RegisterAcademyPage() {
         academyName,
         ownerName,
         ownerEmail,
+        ownerPhone,
         password: form.password,
         plan: form.plan
       });
@@ -180,11 +224,10 @@ export function RegisterAcademyPage() {
             label="Plan"
             value={form.plan}
             onChange={(value) => setForm((prev) => ({ ...prev, plan: value as AcademyPlan }))}
-            options={[
-              { value: "basic", label: "Basic" },
-              { value: "pro", label: "Pro" },
-              { value: "premium", label: "Premium" }
-            ]}
+            options={(["basic", "pro", "premium"] as AcademyPlan[]).map((plan) => ({
+              value: plan,
+              label: `${getPlanLabel(platformConfig, plan)} - $${getPlanPrice(platformConfig, plan)}/mes`
+            }))}
           />
           <Field
             label="Tu nombre"
@@ -196,6 +239,12 @@ export function RegisterAcademyPage() {
             type="email"
             value={form.ownerEmail}
             onChange={(value) => setForm((prev) => ({ ...prev, ownerEmail: value }))}
+          />
+          <Field
+            label="WhatsApp"
+            type="tel"
+            value={form.ownerPhone}
+            onChange={(value) => setForm((prev) => ({ ...prev, ownerPhone: normalizeOwnerPhone(value) }))}
           />
           <Field
             label="Password"
@@ -212,7 +261,14 @@ export function RegisterAcademyPage() {
         </div>
 
         <div className="mt-4 rounded-brand border border-slate-700 bg-bg p-3 text-xs text-muted">
+          El WhatsApp del owner queda listo con prefijo argentino para contactarlo sin corregir el numero.
+        </div>
+        <div className="mt-3 rounded-brand border border-slate-700 bg-bg p-3 text-xs text-muted">
           Se crea una sola cuenta por email. Si ya existe, solo tienes que iniciar sesion con ese mismo correo.
+        </div>
+        <div className="mt-3 rounded-brand border border-primary/20 bg-primary/5 p-3 text-sm text-muted">
+          <p className="font-semibold text-text">{getPlanLabel(platformConfig, form.plan)} - ${getPlanPrice(platformConfig, form.plan)}/mes</p>
+          <p className="mt-1">{getPlanDescription(platformConfig, form.plan)}</p>
         </div>
 
         {error && <p className="mt-4 text-sm text-danger">{error}</p>}

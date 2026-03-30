@@ -37,6 +37,7 @@ interface RegisterAcademyPayload {
   plan: Plan;
   ownerName: string;
   ownerEmail: string;
+  ownerPhone: string;
   password: string;
 }
 
@@ -189,6 +190,7 @@ function validateRegisterAcademyPayload(data: unknown): RegisterAcademyPayload {
   const academyName = payload.academyName?.trim() ?? "";
   const ownerName = payload.ownerName?.trim() ?? "";
   const ownerEmail = payload.ownerEmail?.trim().toLowerCase() ?? "";
+  const ownerPhone = normalizeArgentinaWhatsApp(payload.ownerPhone);
   const password = payload.password?.trim() ?? "";
 
   if (!academyName) throw new HttpsError("invalid-argument", "academyName es requerido.");
@@ -208,9 +210,31 @@ function validateRegisterAcademyPayload(data: unknown): RegisterAcademyPayload {
     academyName,
     ownerName,
     ownerEmail,
+    ownerPhone,
     plan: payload.plan,
     password
   };
+}
+
+function normalizeArgentinaWhatsApp(value: unknown) {
+  const rawValue = typeof value === "string" ? value.trim() : "";
+  const digits = rawValue.replace(/\D/g, "");
+  let localDigits = digits;
+
+  if (localDigits.startsWith("549")) localDigits = localDigits.slice(3);
+  else if (localDigits.startsWith("54")) localDigits = localDigits.slice(2);
+  else if (localDigits.startsWith("9")) localDigits = localDigits.slice(1);
+
+  if (!localDigits) {
+    throw new HttpsError("invalid-argument", "ownerPhone es requerido.");
+  }
+
+  const normalizedLocalDigits = localDigits.slice(0, 13);
+  if (normalizedLocalDigits.length < 8) {
+    throw new HttpsError("invalid-argument", "ownerPhone invalido.");
+  }
+
+  return `+54 9 ${normalizedLocalDigits}`;
 }
 
 const callableOptions = {
@@ -475,6 +499,7 @@ export const registerAcademy = onCall(callableOptions, async (request) => {
       {
         email: payload.ownerEmail,
         displayName: payload.ownerName,
+        phone: payload.ownerPhone,
         platformRole: "user",
         active: true,
         createdAt: FieldValue.serverTimestamp(),
@@ -490,7 +515,8 @@ export const registerAcademy = onCall(callableOptions, async (request) => {
       owner: {
         uid: ownerUid,
         name: payload.ownerName,
-        email: payload.ownerEmail
+        email: payload.ownerEmail,
+        phone: payload.ownerPhone
       },
       planLimits: {
         maxStudents: platformSettings.plans[payload.plan].maxStudents ?? maxStudentsByPlan(payload.plan)
