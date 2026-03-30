@@ -2,6 +2,9 @@ import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AuthEntryPanel } from "../components/auth/AuthEntryPanel";
+import createFeePreview from "../asset/crear cuota.png";
+import feesPreview from "../asset/cuotas.png";
+import summaryPreview from "../asset/resumen.png";
 import {
   DEFAULT_PLATFORM_CONFIG,
   formatPlanLimitValue,
@@ -189,6 +192,32 @@ export function MarketingLandingPage() {
               </span>
             </div>
 
+            <div className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="overflow-hidden rounded-[22px] border border-[#1F2937] bg-[#0B1020]">
+                <img
+                  src={summaryPreview}
+                  alt="Resumen del panel de PaySync con estado de cobros y alumnos."
+                  className="h-full w-full object-cover"
+                />
+              </div>
+              <div className="grid gap-3">
+                <div className="overflow-hidden rounded-[20px] border border-[#1F2937] bg-[#0B1020]">
+                  <img
+                    src={feesPreview}
+                    alt="Vista de cuotas y seguimiento de pagos en PaySync."
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+                <div className="overflow-hidden rounded-[20px] border border-[#1F2937] bg-[#0B1020]">
+                  <img
+                    src={createFeePreview}
+                    alt="Formulario para crear una cuota dentro de PaySync."
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="mt-4 grid gap-3 sm:grid-cols-3 sm:gap-4">
               <MockMetric label="Pagado" value="72%" tone="text-[#10B981]" />
               <MockMetric label="Pendiente" value="18%" tone="text-[#F9FAFB]" />
@@ -253,10 +282,19 @@ export function MarketingLandingPage() {
               </div>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              {workflowSteps.map((step, index) => (
-                <StepCard key={step} step={`Paso ${index + 1}`} detail={step} />
-              ))}
+            <div className="grid gap-4">
+              <div className="overflow-hidden rounded-[22px] border border-[#1F2937] bg-[#0B1020] shadow-[0_16px_40px_rgba(2,6,23,0.22)]">
+                <img
+                  src={feesPreview}
+                  alt="Pantalla de cuotas de PaySync."
+                  className="h-full w-full object-cover"
+                />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {workflowSteps.map((step, index) => (
+                  <StepCard key={step} step={`Paso ${index + 1}`} detail={step} />
+                ))}
+              </div>
             </div>
           </div>
         </div>
