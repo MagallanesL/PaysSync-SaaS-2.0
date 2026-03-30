@@ -190,7 +190,7 @@ function validateRegisterAcademyPayload(data: unknown): RegisterAcademyPayload {
   const academyName = payload.academyName?.trim() ?? "";
   const ownerName = payload.ownerName?.trim() ?? "";
   const ownerEmail = payload.ownerEmail?.trim().toLowerCase() ?? "";
-  const ownerPhone = normalizeArgentinaWhatsApp(payload.ownerPhone);
+  const ownerPhone = normalizeInternationalWhatsApp(payload.ownerPhone);
   const password = payload.password?.trim() ?? "";
 
   if (!academyName) throw new HttpsError("invalid-argument", "academyName es requerido.");
@@ -216,25 +216,18 @@ function validateRegisterAcademyPayload(data: unknown): RegisterAcademyPayload {
   };
 }
 
-function normalizeArgentinaWhatsApp(value: unknown) {
+function normalizeInternationalWhatsApp(value: unknown) {
   const rawValue = typeof value === "string" ? value.trim() : "";
-  const digits = rawValue.replace(/\D/g, "");
-  let localDigits = digits;
-
-  if (localDigits.startsWith("549")) localDigits = localDigits.slice(3);
-  else if (localDigits.startsWith("54")) localDigits = localDigits.slice(2);
-  else if (localDigits.startsWith("9")) localDigits = localDigits.slice(1);
-
-  if (!localDigits) {
+  if (!rawValue) {
     throw new HttpsError("invalid-argument", "ownerPhone es requerido.");
   }
 
-  const normalizedLocalDigits = localDigits.slice(0, 13);
-  if (normalizedLocalDigits.length < 8) {
+  const normalizedValue = rawValue.replace(/[^\d+]/g, "");
+  if (!/^\+[1-9]\d{7,14}$/.test(normalizedValue)) {
     throw new HttpsError("invalid-argument", "ownerPhone invalido.");
   }
 
-  return `+54 9 ${normalizedLocalDigits}`;
+  return normalizedValue;
 }
 
 const callableOptions = {

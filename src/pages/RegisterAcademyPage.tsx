@@ -2,6 +2,7 @@ import { FirebaseError } from "firebase/app";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
+import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -27,29 +28,15 @@ interface RegisterFormState {
   plan: AcademyPlan;
 }
 
-const DEFAULT_OWNER_PHONE = "+54 9 ";
-
 const initialForm: RegisterFormState = {
   academyName: "",
   ownerName: "",
   ownerEmail: "",
-  ownerPhone: DEFAULT_OWNER_PHONE,
+  ownerPhone: "",
   password: "",
   confirmPassword: "",
   plan: "basic"
 };
-
-function normalizeOwnerPhone(value: string) {
-  const digits = value.replace(/\D/g, "");
-  let localDigits = digits;
-
-  if (localDigits.startsWith("549")) localDigits = localDigits.slice(3);
-  else if (localDigits.startsWith("54")) localDigits = localDigits.slice(2);
-  else if (localDigits.startsWith("9")) localDigits = localDigits.slice(1);
-
-  const trimmedLocalDigits = localDigits.slice(0, 13);
-  return `${DEFAULT_OWNER_PHONE}${trimmedLocalDigits}`.trimEnd();
-}
 
 function getRegisterErrorMessage(error: unknown) {
   if (error instanceof FirebaseError) {
@@ -130,8 +117,7 @@ export function RegisterAcademyPage() {
     const academyName = form.academyName.trim();
     const ownerName = form.ownerName.trim();
     const ownerEmail = form.ownerEmail.trim().toLowerCase();
-    const ownerPhone = normalizeOwnerPhone(form.ownerPhone);
-    const ownerPhoneDigits = ownerPhone.replace(/\D/g, "");
+    const ownerPhone = form.ownerPhone.trim();
 
     if (!academyName || !ownerName || !ownerEmail || !form.password.trim()) {
       setSubmitting(false);
@@ -145,9 +131,15 @@ export function RegisterAcademyPage() {
       return;
     }
 
-    if (ownerPhoneDigits.length <= 3) {
+    if (!ownerPhone) {
       setSubmitting(false);
-      setError("Ingresa un numero de WhatsApp valido para el owner.");
+      setError("Ingresa un numero de WhatsApp para el owner.");
+      return;
+    }
+
+    if (!isValidPhoneNumber(ownerPhone)) {
+      setSubmitting(false);
+      setError("Ingresa un numero de WhatsApp valido.");
       return;
     }
 
@@ -211,7 +203,7 @@ export function RegisterAcademyPage() {
       <form onSubmit={handleSubmit} className="z-10 w-full max-w-xl rounded-brand border border-slate-700/80 bg-surface p-6 shadow-soft">
         <h1 className="font-display text-3xl text-primary">Crea tu academia</h1>
         <p className="mt-2 text-sm text-muted">
-          Empieza hoy mismo con PaySync. Tu cuenta owner y tu academia se crean automaticamente en modo prueba.
+          Empieza hoy con una prueba gratis de {platformConfig.trialDurationDays} dias. Tu cuenta owner y tu academia se crean automaticamente.
         </p>
 
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
@@ -226,7 +218,7 @@ export function RegisterAcademyPage() {
             onChange={(value) => setForm((prev) => ({ ...prev, plan: value as AcademyPlan }))}
             options={(["basic", "pro", "premium"] as AcademyPlan[]).map((plan) => ({
               value: plan,
-              label: `${getPlanLabel(platformConfig, plan)} - $${getPlanPrice(platformConfig, plan)}/mes`
+              label: getPlanLabel(platformConfig, plan)
             }))}
           />
           <Field
@@ -240,11 +232,10 @@ export function RegisterAcademyPage() {
             value={form.ownerEmail}
             onChange={(value) => setForm((prev) => ({ ...prev, ownerEmail: value }))}
           />
-          <Field
+          <PhoneField
             label="WhatsApp"
-            type="tel"
             value={form.ownerPhone}
-            onChange={(value) => setForm((prev) => ({ ...prev, ownerPhone: normalizeOwnerPhone(value) }))}
+            onChange={(value) => setForm((prev) => ({ ...prev, ownerPhone: value }))}
           />
           <Field
             label="Password"
@@ -260,15 +251,14 @@ export function RegisterAcademyPage() {
           />
         </div>
 
-        <div className="mt-4 rounded-brand border border-slate-700 bg-bg p-3 text-xs text-muted">
-          El WhatsApp del owner queda listo con prefijo argentino para contactarlo sin corregir el numero.
-        </div>
-        <div className="mt-3 rounded-brand border border-slate-700 bg-bg p-3 text-xs text-muted">
-          Se crea una sola cuenta por email. Si ya existe, solo tienes que iniciar sesion con ese mismo correo.
-        </div>
-        <div className="mt-3 rounded-brand border border-primary/20 bg-primary/5 p-3 text-sm text-muted">
-          <p className="font-semibold text-text">{getPlanLabel(platformConfig, form.plan)} - ${getPlanPrice(platformConfig, form.plan)}/mes</p>
-          <p className="mt-1">{getPlanDescription(platformConfig, form.plan)}</p>
+        <div className="mt-4 rounded-brand border border-primary/30 bg-gradient-to-br from-primary/12 via-primary/5 to-bg p-4 text-sm text-muted shadow-soft">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Tu inicio en PaySync</p>
+          <p className="mt-2 text-lg font-semibold leading-7 text-text">
+            Prueba gratis por {platformConfig.trialDurationDays} dias con plan {getPlanLabel(platformConfig, form.plan)}
+          </p>
+          <p className="mt-2 leading-6">
+            Luego continua en ${getPlanPrice(platformConfig, form.plan)}/mes. {getPlanDescription(platformConfig, form.plan)}
+          </p>
         </div>
 
         {error && <p className="mt-4 text-sm text-danger">{error}</p>}
@@ -341,6 +331,31 @@ function SelectField({
           </option>
         ))}
       </select>
+    </label>
+  );
+}
+
+function PhoneField({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="grid gap-1 text-sm">
+      {label}
+      <PhoneInput
+        international
+        defaultCountry="AR"
+        countryCallingCodeEditable={false}
+        placeholder="Ingresa tu WhatsApp"
+        value={value || undefined}
+        onChange={(nextValue) => onChange(nextValue ?? "")}
+        className="phone-input rounded-brand border border-slate-600 bg-bg px-3 py-2 focus-within:border-primary"
+      />
     </label>
   );
 }
