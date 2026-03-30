@@ -34,6 +34,11 @@ function generateTemporaryPassword() {
   return `PaySync-${Math.random().toString(36).slice(-10)}A1`;
 }
 
+function shortenId(value: string, visible = 8) {
+  if (value.length <= visible * 2) return value;
+  return `${value.slice(0, visible)}...${value.slice(-visible)}`;
+}
+
 function validateForm(form: CreateUserFormState) {
   const displayName = form.displayName.trim();
   const email = form.email.trim().toLowerCase();
@@ -217,7 +222,46 @@ export function UsersPage() {
     <div className="grid gap-4 lg:grid-cols-5">
       <div className="lg:col-span-3">
         <Panel title="Equipo del centro">
-          <div className="overflow-x-auto">
+          <div className="space-y-3 md:hidden">
+            {loading ? (
+              <div className="rounded-brand border border-slate-800 bg-bg/60 px-4 py-5 text-sm text-muted">Cargando...</div>
+            ) : users.length === 0 ? (
+              <div className="rounded-brand border border-slate-800 bg-bg/60 px-4 py-5 text-sm text-muted">
+                No hay usuarios cargados todavia.
+              </div>
+            ) : (
+              users.map((user) => (
+                <article key={user.id} className="rounded-brand border border-slate-800 bg-bg/60 p-4 shadow-soft">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-base font-semibold text-text break-words">{user.displayName ?? "Sin nombre"}</p>
+                      <p className="mt-1 text-sm text-muted break-all">{user.email}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
+                      {formatAcademyRole(user.role)}
+                    </span>
+                  </div>
+
+                  <dl className="mt-4 grid gap-3 text-sm">
+                    <div className="rounded-brand border border-slate-800 bg-slate-950/30 px-3 py-2">
+                      <dt className="text-[11px] uppercase tracking-wide text-muted">UID</dt>
+                      <dd className="mt-1 font-mono text-xs text-text" title={user.id}>
+                        {shortenId(user.id, 6)}
+                      </dd>
+                    </div>
+                    <div className="rounded-brand border border-slate-800 bg-slate-950/30 px-3 py-2">
+                      <dt className="text-[11px] uppercase tracking-wide text-muted">Estado</dt>
+                      <dd className="mt-1 text-xs font-semibold uppercase tracking-wide text-muted">
+                        {formatMembershipStatus(user.status)}
+                      </dd>
+                    </div>
+                  </dl>
+                </article>
+              ))
+            )}
+          </div>
+
+          <div className="hidden overflow-x-auto md:block">
             <table className="min-w-full text-sm">
               <thead className="text-left text-muted">
                 <tr>
@@ -244,9 +288,9 @@ export function UsersPage() {
                 ) : (
                   users.map((user) => (
                     <tr key={user.id} className="border-t border-slate-800">
-                      <td className="px-3 py-3 text-muted">{user.id}</td>
-                      <td className="px-3 py-3">{user.displayName ?? "-"}</td>
-                      <td className="px-3 py-3">{user.email}</td>
+                      <td className="px-3 py-3 font-mono text-xs text-muted">{shortenId(user.id)}</td>
+                      <td className="px-3 py-3 break-words">{user.displayName ?? "-"}</td>
+                      <td className="px-3 py-3 break-all">{user.email}</td>
                       <td className="px-3 py-3 uppercase text-primary">{formatAcademyRole(user.role)}</td>
                       <td className="px-3 py-3 uppercase text-muted">{formatMembershipStatus(user.status)}</td>
                     </tr>

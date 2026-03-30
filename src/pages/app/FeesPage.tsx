@@ -577,7 +577,73 @@ export function FeesPage() {
           <span>Orden: mas vencidas primero</span>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="space-y-3 md:hidden">
+          {trackingRows.map((fee) => (
+            <article key={fee.id} className="rounded-brand border border-slate-800 bg-bg p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-text">{fee.studentName}</p>
+                  <p className="break-words text-sm text-muted">{fee.disciplineName ?? fee.observation ?? fee.concept}</p>
+                </div>
+                <PriorityBadge daysLeft={fee.daysLeft} />
+              </div>
+
+              <div className="mt-3 grid gap-2 text-sm text-muted">
+                <MobileInfo
+                  label="Modalidad"
+                  value={
+                    fee.paymentMode === "monthly"
+                      ? "Mensual"
+                      : fee.partialAllowed
+                        ? "Entrega parcial"
+                        : "Cargo unico"
+                  }
+                />
+                <MobileInfo label="Periodo" value={fee.period ? formatPeriodLabel(fee.period) : fee.concept} />
+                <MobileInfo label="Vencimiento" value={fee.dueDate} />
+              </div>
+
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                <Summary label="Total" value={`$${fee.amount}`} color="text-primary" />
+                <Summary label="Entregado" value={`$${fee.paidAmount}`} color="text-secondary" />
+                <Summary label="Saldo" value={`$${fee.balance}`} color="text-warning" />
+              </div>
+
+              <div className="mt-4 flex flex-col gap-2">
+                <div>
+                  <p className="mb-1 text-[11px] uppercase tracking-wide text-muted">Estado</p>
+                  <StatusBadge status={fee.status} />
+                </div>
+                {fee.whatsappUrl ? (
+                  <a
+                    href={fee.whatsappUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`Enviar WhatsApp a ${fee.studentName}`}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-brand bg-secondary/15 px-3 py-2 text-sm font-medium text-secondary transition hover:bg-secondary/25"
+                  >
+                    <WhatsAppIcon />
+                    Avisar por WhatsApp
+                  </a>
+                ) : (
+                  <p className="text-sm text-muted">Sin aviso disponible</p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => openEditModal(fee)}
+                  disabled={!canWriteAcademyData || isPreviewMode}
+                  className="w-full rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
+                >
+                  Gestionar
+                </button>
+              </div>
+            </article>
+          ))}
+          {trackingRows.length === 0 && (
+            <p className="text-sm text-muted">No hay cuotas para seguir dentro de los proximos 15 dias.</p>
+          )}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
           <table className="min-w-full text-sm">
             <thead className="text-left text-muted">
               <tr>
@@ -742,6 +808,15 @@ export function FeesPage() {
         </div>
       )}
     </>
+  );
+}
+
+function MobileInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-1">
+      <p className="text-[11px] uppercase tracking-wide text-muted">{label}</p>
+      <p className="break-words text-text">{value}</p>
+    </div>
   );
 }
 
