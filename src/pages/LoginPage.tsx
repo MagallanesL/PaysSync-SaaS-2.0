@@ -1,7 +1,7 @@
 import { FirebaseError } from "firebase/app";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { useState, type FormEvent } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { auth } from "../lib/firebase";
 
@@ -85,6 +85,12 @@ export function LoginPage() {
           >
             {submitting ? "Ingresando..." : "Ingresar"}
           </button>
+          <div className="mt-2 rounded-brand border border-slate-700 bg-bg/60 p-3 text-sm text-muted">
+            <p>¿Aun no tienes cuenta?</p>
+            <Link to="/register" className="mt-2 inline-flex font-semibold text-primary transition hover:brightness-110">
+              Crear mi academia
+            </Link>
+          </div>
         </div>
       </form>
     </div>

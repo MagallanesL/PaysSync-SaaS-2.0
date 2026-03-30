@@ -24,6 +24,22 @@ interface CreateAcademyPayload {
   password?: string;
 }
 
+interface CreateAcademyUserPayload {
+  academyId: string;
+  displayName: string;
+  email: string;
+  role: AcademyRole;
+  password?: string;
+}
+
+interface RegisterAcademyPayload {
+  academyName: string;
+  plan: Plan;
+  ownerName: string;
+  ownerEmail: string;
+  password: string;
+}
+
 interface PlatformSettings {
   trialDurationDays: number;
   plans: Record<Plan, PlanSettings>;
@@ -128,6 +144,72 @@ function validatePayload(data: unknown): CreateAcademyPayload {
     ownerEmail: payload.ownerEmail.trim().toLowerCase(),
     ownerRole: payload.ownerRole,
     password: payload.password?.trim()
+  };
+}
+
+function validateCreateAcademyUserPayload(data: unknown): CreateAcademyUserPayload {
+  if (!data || typeof data !== "object") {
+    throw new HttpsError("invalid-argument", "Payload invalido.");
+  }
+
+  const payload = data as Partial<CreateAcademyUserPayload>;
+  const roleValues: AcademyRole[] = ["owner", "staff", "viewer"];
+  const academyId = payload.academyId?.trim() ?? "";
+  const displayName = payload.displayName?.trim() ?? "";
+  const email = payload.email?.trim().toLowerCase() ?? "";
+  const password = payload.password?.trim();
+
+  if (!academyId) throw new HttpsError("invalid-argument", "academyId es requerido.");
+  if (!displayName) throw new HttpsError("invalid-argument", "displayName es requerido.");
+  if (!email) throw new HttpsError("invalid-argument", "email es requerido.");
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw new HttpsError("invalid-argument", "email invalido.");
+  if (!payload.role || !roleValues.includes(payload.role)) {
+    throw new HttpsError("invalid-argument", "role invalido.");
+  }
+  if (password && password.length < 6) {
+    throw new HttpsError("invalid-argument", "La password debe tener al menos 6 caracteres.");
+  }
+
+  return {
+    academyId,
+    displayName,
+    email,
+    role: payload.role,
+    password
+  };
+}
+
+function validateRegisterAcademyPayload(data: unknown): RegisterAcademyPayload {
+  if (!data || typeof data !== "object") {
+    throw new HttpsError("invalid-argument", "Payload invalido.");
+  }
+
+  const payload = data as Partial<RegisterAcademyPayload>;
+  const planValues: Plan[] = ["basic", "pro", "premium"];
+  const academyName = payload.academyName?.trim() ?? "";
+  const ownerName = payload.ownerName?.trim() ?? "";
+  const ownerEmail = payload.ownerEmail?.trim().toLowerCase() ?? "";
+  const password = payload.password?.trim() ?? "";
+
+  if (!academyName) throw new HttpsError("invalid-argument", "academyName es requerido.");
+  if (!ownerName) throw new HttpsError("invalid-argument", "ownerName es requerido.");
+  if (!ownerEmail) throw new HttpsError("invalid-argument", "ownerEmail es requerido.");
+  if (!/^\S+@\S+\.\S+$/.test(ownerEmail)) {
+    throw new HttpsError("invalid-argument", "ownerEmail invalido.");
+  }
+  if (!payload.plan || !planValues.includes(payload.plan)) {
+    throw new HttpsError("invalid-argument", "plan invalido.");
+  }
+  if (password.length < 6) {
+    throw new HttpsError("invalid-argument", "La password debe tener al menos 6 caracteres.");
+  }
+
+  return {
+    academyName,
+    ownerName,
+    ownerEmail,
+    plan: payload.plan,
+    password
   };
 }
 
@@ -352,6 +434,256 @@ export const syncOwnerMembership = onCall(callableOptions, async (request) => {
 
   await batch.commit();
   return { synced: academies.length };
+});
+
+export const registerAcademy = onCall(callableOptions, async (request) => {
+  const payload = validateRegisterAcademyPayload(request.data);
+
+  try {
+    await adminAuth.getUserByEmail(payload.ownerEmail);
+    throw new HttpsError("already-exists", "Ese email ya existe en Firebase Authentication.");
+  } catch (error) {
+    const authError = error as { code?: string };
+    if (authError.code && authError.code !== "auth/user-not-found") {
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError("internal", "No se pudo validar el email del owner.");
+    }
+  }
+
+  const academyRef = db.collection("academies").doc();
+  const slugBase = slugify(payload.academyName);
+  const slug = `${slugBase}-${academyRef.id.slice(0, 6)}`;
+  const platformSettings = await loadPlatformSettings();
+  const now = Timestamp.now();
+  const trialEndsAt = Timestamp.fromMillis(
+    now.toMillis() + platformSettings.trialDurationDays * 24 * 60 * 60 * 1000
+  );
+
+  let ownerUid = "";
+
+  try {
+    const createdUser = await adminAuth.createUser({
+      email: payload.ownerEmail,
+      displayName: payload.ownerName,
+      password: payload.password
+    });
+    ownerUid = createdUser.uid;
+
+    const batch = db.batch();
+    batch.set(
+      db.doc(`users/${ownerUid}`),
+      {
+        email: payload.ownerEmail,
+        displayName: payload.ownerName,
+        platformRole: "user",
+        active: true,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+    batch.set(academyRef, {
+      name: payload.academyName,
+      slug,
+      plan: payload.plan,
+      status: "trial",
+      owner: {
+        uid: ownerUid,
+        name: payload.ownerName,
+        email: payload.ownerEmail
+      },
+      planLimits: {
+        maxStudents: platformSettings.plans[payload.plan].maxStudents ?? maxStudentsByPlan(payload.plan)
+      },
+      counters: {
+        students: 0,
+        fees: 0,
+        payments: 0
+      },
+      trial: {
+        active: true,
+        startedAt: now,
+        endsAt: trialEndsAt
+      },
+      subscription: {
+        active: false,
+        mrr: 0
+      },
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp()
+    });
+    batch.set(db.doc(`academies/${academyRef.id}/users/${ownerUid}`), {
+      userId: ownerUid,
+      email: payload.ownerEmail,
+      displayName: payload.ownerName,
+      role: "owner",
+      status: "active",
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp()
+    });
+    await batch.commit();
+
+    logger.info("academy registered successfully", {
+      academyId: academyRef.id,
+      ownerUid,
+      ownerEmail: payload.ownerEmail,
+      plan: payload.plan
+    });
+
+    return {
+      academyId: academyRef.id,
+      ownerUid,
+      trialDurationDays: platformSettings.trialDurationDays
+    };
+  } catch (error) {
+    if (ownerUid) {
+      try {
+        await adminAuth.deleteUser(ownerUid);
+      } catch (cleanupError) {
+        logger.error("registerAcademy cleanup failed", {
+          ownerUid,
+          error: cleanupError
+        });
+      }
+    }
+
+    if (error instanceof HttpsError) throw error;
+
+    const authError = error as { code?: string; message?: string };
+    if (authError.code === "auth/email-already-exists") {
+      throw new HttpsError("already-exists", "Ese email ya existe en Firebase Authentication.");
+    }
+    if (authError.code === "auth/invalid-email") {
+      throw new HttpsError("invalid-argument", "El email ingresado no es valido.");
+    }
+    if (authError.code === "auth/invalid-password" || authError.code === "auth/weak-password") {
+      throw new HttpsError("invalid-argument", "La password es demasiado debil.");
+    }
+
+    logger.error("registerAcademy failed", {
+      academyName: payload.academyName,
+      ownerEmail: payload.ownerEmail,
+      code: authError.code ?? "unknown",
+      message: authError.message ?? "unknown"
+    });
+    throw new HttpsError("internal", "No se pudo registrar la academia.");
+  }
+});
+
+export const createAcademyUser = onCall(callableOptions, async (request) => {
+  if (!request.auth?.uid) throw new HttpsError("unauthenticated", "Debes iniciar sesion.");
+
+  const payload = validateCreateAcademyUserPayload(request.data);
+  const academyRef = db.doc(`academies/${payload.academyId}`);
+  const callerMembershipRef = db.doc(`academies/${payload.academyId}/users/${request.auth.uid}`);
+
+  const [academySnap, callerMembershipSnap] = await Promise.all([academyRef.get(), callerMembershipRef.get()]);
+  if (!academySnap.exists) {
+    throw new HttpsError("not-found", "La academia indicada no existe.");
+  }
+
+  const academyStatus = String(academySnap.data()?.status ?? "").toLowerCase();
+  if (academyStatus === "suspended") {
+    throw new HttpsError("failed-precondition", "La academia esta suspendida.");
+  }
+
+  if (!callerMembershipSnap.exists) {
+    throw new HttpsError("permission-denied", "Solo el owner puede crear usuarios.");
+  }
+
+  const callerMembership = callerMembershipSnap.data() as { role?: string; status?: string };
+  if (callerMembership.role !== "owner" || callerMembership.status !== "active") {
+    throw new HttpsError("permission-denied", "Solo el owner activo puede crear usuarios.");
+  }
+
+  try {
+    await adminAuth.getUserByEmail(payload.email);
+    throw new HttpsError("already-exists", "Ese email ya existe en Firebase Authentication.");
+  } catch (error) {
+    const authError = error as { code?: string };
+    if (authError.code && authError.code !== "auth/user-not-found") {
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError("internal", "No se pudo validar el email del usuario.");
+    }
+  }
+
+  const generatedPassword = payload.password || randomPassword();
+  let createdUserUid = "";
+
+  try {
+    const createdUser = await adminAuth.createUser({
+      email: payload.email,
+      displayName: payload.displayName,
+      password: generatedPassword
+    });
+    createdUserUid = createdUser.uid;
+
+    const batch = db.batch();
+    batch.set(
+      db.doc(`users/${createdUserUid}`),
+      {
+        email: payload.email,
+        displayName: payload.displayName,
+        platformRole: "user",
+        active: true,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+    batch.set(
+      db.doc(`academies/${payload.academyId}/users/${createdUserUid}`),
+      {
+        userId: createdUserUid,
+        email: payload.email,
+        displayName: payload.displayName,
+        role: payload.role,
+        status: "active",
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
+      }
+    );
+
+    await batch.commit();
+
+    return {
+      uid: createdUserUid,
+      email: payload.email,
+      generatedPassword: payload.password ? null : generatedPassword
+    };
+  } catch (error) {
+    if (createdUserUid) {
+      try {
+        await adminAuth.deleteUser(createdUserUid);
+      } catch (cleanupError) {
+        logger.error("createAcademyUser cleanup failed", {
+          uid: createdUserUid,
+          error: cleanupError
+        });
+      }
+    }
+
+    if (error instanceof HttpsError) throw error;
+
+    const authError = error as { code?: string; message?: string };
+    if (authError.code === "auth/email-already-exists") {
+      throw new HttpsError("already-exists", "Ese email ya existe en Firebase Authentication.");
+    }
+    if (authError.code === "auth/invalid-password" || authError.code === "auth/weak-password") {
+      throw new HttpsError("invalid-argument", "La password es demasiado debil.");
+    }
+    if (authError.code === "auth/invalid-email") {
+      throw new HttpsError("invalid-argument", "El email ingresado no es valido.");
+    }
+
+    logger.error("createAcademyUser failed", {
+      academyId: payload.academyId,
+      callerUid: request.auth.uid,
+      code: authError.code ?? "unknown",
+      message: authError.message ?? "unknown"
+    });
+    throw new HttpsError("internal", "No se pudo crear el usuario.");
+  }
 });
 
 export const syncMembershipByEmail = onCall(callableOptions, async (request) => {

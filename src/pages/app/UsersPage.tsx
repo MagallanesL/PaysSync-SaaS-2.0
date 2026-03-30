@@ -1,22 +1,11 @@
 import { FirebaseError } from "firebase/app";
-import {
-  createUserWithEmailAndPassword,
-  deleteUser,
-  signOut as signOutSecondary
-} from "firebase/auth";
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  serverTimestamp,
-  setDoc
-} from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import { collection, getDocs } from "firebase/firestore";
 import { useEffect, useState, type FormEvent } from "react";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
 import { formatAcademyRole, formatMembershipStatus } from "../../lib/display";
-import { db, getSecondaryAuth, getSecondaryDb } from "../../lib/firebase";
+import { db, functions } from "../../lib/firebase";
 import type { AcademyRole } from "../../lib/types";
 
 interface AcademyUser {
@@ -69,15 +58,27 @@ function validateForm(form: CreateUserFormState) {
 function getUserCreationError(error: unknown) {
   if (error instanceof FirebaseError) {
     switch (error.code) {
+      case "functions/already-exists":
+      case "already-exists":
       case "auth/email-already-in-use":
         return "Ese email ya existe en Firebase Auth.";
+      case "functions/invalid-argument":
+      case "invalid-argument":
       case "auth/invalid-email":
         return "El email ingresado no es valido.";
-      case "auth/weak-password":
-        return "La password es demasiado debil.";
+      case "functions/failed-precondition":
+      case "failed-precondition":
+        return "La academia no esta habilitada para crear usuarios.";
+      case "functions/permission-denied":
       case "permission-denied":
       case "firestore/permission-denied":
         return "No tienes permisos para guardar este usuario en Firestore.";
+      case "functions/unauthenticated":
+        return "Tu sesion ya no es valida. Vuelve a iniciar sesion.";
+      case "functions/internal":
+        return "No se pudo crear el usuario en el backend.";
+      case "auth/weak-password":
+        return "La password es demasiado debil.";
       default:
         return error.message;
     }
@@ -94,6 +95,20 @@ export function UsersPage() {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const createAcademyUser = httpsCallable<
+    {
+      academyId: string;
+      displayName: string;
+      email: string;
+      role: AcademyRole;
+      password?: string;
+    },
+    {
+      uid: string;
+      email: string;
+      generatedPassword: string | null;
+    }
+  >(functions, "createAcademyUser");
 
   const canManageUsers = membership?.role === "owner";
 
@@ -167,78 +182,33 @@ export function UsersPage() {
       return;
     }
 
-    const secondaryAuth = getSecondaryAuth();
-    const secondaryDb = getSecondaryDb();
     const finalPassword = normalized.password || generateTemporaryPassword();
-
-    let createdUid: string | null = null;
-    let createdUserDoc = false;
 
     setSubmitting(true);
     setError(null);
     setMessage(null);
 
     try {
-      const credential = await createUserWithEmailAndPassword(secondaryAuth, normalized.email, finalPassword);
-      createdUid = credential.user.uid;
-
-      await setDoc(doc(secondaryDb, "users", createdUid), {
-        email: normalized.email,
+      const result = await createAcademyUser({
+        academyId: membership.academyId,
         displayName: normalized.displayName,
-        platformRole: "user",
-        active: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-      createdUserDoc = true;
-
-      await setDoc(doc(db, `academies/${membership.academyId}/users/${createdUid}`), {
-        userId: createdUid,
         email: normalized.email,
-        displayName: normalized.displayName,
         role: form.role,
-        status: "active",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        password: normalized.password || undefined
       });
 
       setForm(initialForm);
       setMessage(
-        normalized.password
+        result.data.generatedPassword
+          ? `Usuario creado correctamente. Password temporal: ${result.data.generatedPassword}`
+          : normalized.password
           ? "Usuario creado correctamente."
           : `Usuario creado correctamente. Password temporal: ${finalPassword}`
       );
       await loadUsers();
     } catch (creationError) {
-      if (createdUid) {
-        try {
-          if (createdUserDoc) {
-            await deleteDoc(doc(secondaryDb, "users", createdUid));
-          }
-          if (secondaryAuth.currentUser) {
-            await deleteUser(secondaryAuth.currentUser);
-          }
-        } catch {
-          setError(
-            "Se creo la cuenta en Auth pero no se completo el alta. Revisa Firebase Auth y Firestore antes de reintentar."
-          );
-          setSubmitting(false);
-          try {
-            await signOutSecondary(secondaryAuth);
-          } catch {
-            // No-op: preserving admin session is handled by the primary auth instance.
-          }
-          return;
-        }
-      }
-
       setError(getUserCreationError(creationError));
     } finally {
-      try {
-        await signOutSecondary(secondaryAuth);
-      } catch {
-        // No-op: preserving admin session is handled by the primary auth instance.
-      }
       setSubmitting(false);
     }
   }
