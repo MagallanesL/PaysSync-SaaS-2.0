@@ -113,7 +113,7 @@ function maxStudentsByPlan(plan: Plan): number | null {
 
 function defaultPlatformSettings(): PlatformSettings {
   return {
-    trialDurationDays: 15,
+    trialDurationDays: 14,
     plans: {
       basic: {
         label: "Basico",
