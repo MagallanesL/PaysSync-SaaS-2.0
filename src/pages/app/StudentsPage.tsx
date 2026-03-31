@@ -67,7 +67,9 @@ export function StudentsPage() {
   const [plan, setPlan] = useState<AcademyPlan>("basic");
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showAdditionalData, setShowAdditionalData] = useState(false);
 
   async function loadData() {
     if (isPreviewMode) {
@@ -270,6 +272,7 @@ export function StudentsPage() {
     const trimmedPhone = form.phone.trim();
 
     setError(null);
+    setSuccessMessage(null);
 
     if (!trimmedName) {
       setError("El nombre es obligatorio.");
@@ -409,6 +412,7 @@ export function StudentsPage() {
     }
 
     closeModal();
+    setSuccessMessage("Alumno creado + cuota generada");
     await loadData();
   }
 
@@ -425,6 +429,8 @@ export function StudentsPage() {
     setEditingId(null);
     setForm(emptyForm);
     setError(null);
+    setSuccessMessage(null);
+    setShowAdditionalData(false);
     setIsModalOpen(true);
   }
 
@@ -443,6 +449,8 @@ export function StudentsPage() {
       disciplineIds: student.disciplines.map((discipline) => discipline.disciplineId)
     });
     setError(null);
+    setSuccessMessage(null);
+    setShowAdditionalData(Boolean(student.emergencyContactName || student.emergencyContactPhone || student.allergies));
     setIsModalOpen(true);
   }
 
@@ -450,6 +458,7 @@ export function StudentsPage() {
     setEditingId(null);
     setForm(emptyForm);
     setError(null);
+    setShowAdditionalData(false);
     setIsModalOpen(false);
   }
 
@@ -515,6 +524,11 @@ export function StudentsPage() {
         <p className="mb-3 text-xs text-muted">
           Plan actual: <span className="uppercase text-primary">{getPlanLabel(platformConfig, plan)}</span> | Limite: {maxStudents ?? "Ilimitado"} | Activos: {activeStudentsCount} | Total: {snapshot?.students.length ?? 0}
         </p>
+        {successMessage ? (
+          <div className="mb-3 rounded-brand border border-secondary/30 bg-secondary/10 px-3 py-3 text-sm text-secondary">
+            {successMessage}
+          </div>
+        ) : null}
 
         <div className="space-y-3 md:hidden">
           {visibleStudents.map((student) => (
@@ -633,10 +647,10 @@ export function StudentsPage() {
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h2 id="student-modal-title" className="font-display text-lg text-text">
-                  {editingId ? "Editar alumno" : "Nuevo alumno"}
+                  {editingId ? "Editar alumno y asignacion de cuota" : "Nuevo alumno y asignacion de cuota"}
                 </h2>
                 <p className="mt-1 text-xs text-muted">
-                  Al asignar una disciplina activa se genera la cuota inicial del periodo actual si todavia no existe.
+                  Deja lista el alta operativa para cobrar desde este mismo paso.
                 </p>
               </div>
               <button
@@ -649,7 +663,56 @@ export function StudentsPage() {
             </div>
 
             <form onSubmit={(event) => void handleSave(event)} className="grid gap-4 text-sm">
-              <SectionTitle title="Datos del alumno" />
+              <SectionTitle title="Asignacion de disciplina" />
+              <div className="rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#0B0F1A] p-3">
+                <p className="text-xs uppercase tracking-wide text-primary">Alta con impacto inmediato</p>
+                <p className="mt-2 text-sm text-muted">Se generara automaticamente la cuota del mes actual.</p>
+              </div>
+              <div className="grid gap-2 rounded-brand border border-slate-700 bg-bg p-3">
+                {disciplines.length > 0 ? (
+                  disciplines.map((discipline) => (
+                    <label key={discipline.id} className="rounded-brand border border-slate-800 bg-[#0B0F1A] p-3 text-sm text-muted transition hover:border-primary/40">
+                      <span className="flex items-start justify-between gap-3">
+                        <span className="min-w-0">
+                          <span className="block font-medium text-text">{discipline.name}</span>
+                          <span className="mt-1 block text-xs uppercase text-primary">
+                            {discipline.modality || "Mensual"}
+                          </span>
+                          <span className="mt-2 block text-xs text-muted">
+                            Monto mensual: <span className="text-text">${discipline.baseAmount}</span>
+                          </span>
+                          <span className="mt-1 block text-xs text-muted">
+                            Dia de vencimiento: <span className="text-text">{snapshot?.defaultBillingDay ?? 10}</span>
+                          </span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={form.disciplineIds.includes(discipline.id)}
+                          onChange={(event) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              disciplineIds: event.target.checked
+                                ? [...prev.disciplineIds, discipline.id]
+                                : prev.disciplineIds.filter((id) => id !== discipline.id)
+                            }))
+                          }
+                          className="mt-1"
+                        />
+                      </span>
+                    </label>
+                  ))
+                ) : (
+                  <p className="text-xs text-muted">Primero crea disciplinas activas en el modulo Disciplinas.</p>
+                )}
+              </div>
+              {disciplines.length > 0 && form.disciplineIds.length === 0 ? (
+                <div className="rounded-brand border border-warning/30 bg-warning/10 px-3 py-3 text-xs text-warning">
+                  Selecciona al menos una disciplina para generar la cuota inicial.
+                </div>
+              ) : null}
+
+              <SectionTitle title="Datos basicos del alumno" />
+              <p className="-mt-2 text-xs text-muted">Podes completar mas datos despues.</p>
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Nombre completo" value={form.fullName} onChange={(value) => setForm((prev) => ({ ...prev, fullName: value }))} />
                 <Field label="Email" type="email" required={false} value={form.email} onChange={(value) => setForm((prev) => ({ ...prev, email: value }))} />
@@ -672,49 +735,31 @@ export function StudentsPage() {
                 )}
               </div>
 
-              <SectionTitle title="Datos secundarios" />
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Contacto de urgencia" required={false} value={form.emergencyContactName} onChange={(value) => setForm((prev) => ({ ...prev, emergencyContactName: value }))} />
-                <Field label="Telefono de urgencia" required={false} value={form.emergencyContactPhone} onChange={(value) => setForm((prev) => ({ ...prev, emergencyContactPhone: value }))} />
-              </div>
+              <div className="rounded-brand border border-slate-700 bg-bg">
+                <button
+                  type="button"
+                  onClick={() => setShowAdditionalData((prev) => !prev)}
+                  className="flex w-full items-center justify-between px-3 py-3 text-left text-sm text-text"
+                >
+                  <span>Agregar datos adicionales</span>
+                  <span className="text-xs text-primary">{showAdditionalData ? "Ocultar" : "Mostrar"}</span>
+                </button>
+                {showAdditionalData ? (
+                  <div className="grid gap-4 border-t border-slate-700 px-3 py-3">
+                    <SectionTitle title="Datos secundarios" />
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <Field label="Contacto de urgencia" required={false} value={form.emergencyContactName} onChange={(value) => setForm((prev) => ({ ...prev, emergencyContactName: value }))} />
+                      <Field label="Telefono de urgencia" required={false} value={form.emergencyContactPhone} onChange={(value) => setForm((prev) => ({ ...prev, emergencyContactPhone: value }))} />
+                    </div>
 
-              <TextArea
-                label="Alergias"
-                value={form.allergies}
-                onChange={(value) => setForm((prev) => ({ ...prev, allergies: value }))}
-                placeholder="Ej: alergia al mani, asma, medicacion, etc."
-              />
-
-              <SectionTitle title="Asignacion de disciplinas" />
-              <div className="grid gap-2 rounded-brand border border-slate-700 bg-bg p-3">
-                {disciplines.length > 0 ? (
-                  disciplines.map((discipline) => (
-                    <label key={discipline.id} className="flex items-center justify-between gap-3 text-sm text-muted">
-                      <span>
-                        {discipline.name}
-                        <span className="ml-2 text-xs uppercase text-primary">{discipline.modality || "Mensual"}</span>
-                      </span>
-                      <span className="flex items-center gap-3">
-                        <span className="text-[11px] text-muted">Vence dia {snapshot?.defaultBillingDay ?? 10}</span>
-                        <span className="text-primary">${discipline.baseAmount}</span>
-                        <input
-                          type="checkbox"
-                          checked={form.disciplineIds.includes(discipline.id)}
-                          onChange={(event) =>
-                            setForm((prev) => ({
-                              ...prev,
-                              disciplineIds: event.target.checked
-                                ? [...prev.disciplineIds, discipline.id]
-                                : prev.disciplineIds.filter((id) => id !== discipline.id)
-                            }))
-                          }
-                        />
-                      </span>
-                    </label>
-                  ))
-                ) : (
-                  <p className="text-xs text-muted">Primero crea disciplinas activas en el modulo Disciplinas.</p>
-                )}
+                    <TextArea
+                      label="Alergias"
+                      value={form.allergies}
+                      onChange={(value) => setForm((prev) => ({ ...prev, allergies: value }))}
+                      placeholder="Ej: alergia al mani, asma, medicacion, etc."
+                    />
+                  </div>
+                ) : null}
               </div>
 
               {error && <p className="text-xs text-danger">{error}</p>}
@@ -724,7 +769,7 @@ export function StudentsPage() {
                   Cancelar
                 </button>
                 <button disabled={!canWriteAcademyData || isPreviewMode} className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40">
-                  {isPreviewMode ? "Modo demo" : editingId ? "Guardar cambios" : "Crear alumno"}
+                  {isPreviewMode ? "Modo demo" : editingId ? "Guardar cambios" : "Crear alumno y generar cuota"}
                 </button>
               </div>
             </form>

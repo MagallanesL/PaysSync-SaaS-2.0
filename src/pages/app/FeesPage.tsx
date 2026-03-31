@@ -245,22 +245,22 @@ export function FeesPage() {
   return (
     <>
       <Panel
-        title="Cuotas"
+        title="Cobranza del mes"
         action={
           <button
             type="button"
             onClick={() => void handleGenerateCurrentMonthFees()}
             disabled={!canWriteAcademyData || isPreviewMode}
-            className="rounded-brand border border-primary/40 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10 disabled:opacity-40"
+            className="rounded-brand border border-slate-600 px-3 py-2 text-xs font-semibold text-muted hover:border-primary hover:text-primary disabled:opacity-40"
           >
             {isPreviewMode ? "Modo demo" : "Generar cuotas del mes"}
           </button>
         }
       >
         <div className="mb-4 rounded-brand border border-[rgba(0,209,255,0.15)] bg-[rgba(0,209,255,0.06)] p-4 text-sm">
-          <p className="font-semibold text-text">Cuotas del periodo actual con saldo, pagos parciales y seguimiento real.</p>
+          <p className="font-semibold text-text">Registrá pagos, controlá saldos y gestioná vencimientos en tiempo real.</p>
           <p className="mt-1 text-muted">
-            Cada cobro se registra como pago independiente y la cuota actualiza su estado automaticamente.
+            Priorizá primero lo vencido, después lo que está por vencer, y resolvé la cobranza del mes desde una sola vista.
           </p>
         </div>
 
@@ -324,7 +324,30 @@ export function FeesPage() {
               </article>
             );
           })}
-          {feeRows.length === 0 && <p className="text-sm text-muted">No hay cuotas del periodo actual para mostrar.</p>}
+          {feeRows.length === 0 && (
+            <div className="rounded-brand border border-slate-800 bg-[#0B0F1A] p-4">
+              <p className="text-sm text-text">Todavia no tenes cuotas este mes.</p>
+              <p className="mt-2 text-xs text-muted">
+                Crea un alumno, asignale una disciplina o genera las cuotas del periodo para empezar a cobrar.
+              </p>
+              <div className="mt-3 flex flex-col gap-2">
+                <a href="/app/students" className="rounded-brand bg-primary px-3 py-2 text-center text-xs font-semibold text-bg">
+                  Crear alumno
+                </a>
+                <a href="/app/students" className="rounded-brand border border-secondary/30 px-3 py-2 text-center text-xs text-secondary hover:bg-secondary/10">
+                  Asignar disciplina
+                </a>
+                <button
+                  type="button"
+                  onClick={() => void handleGenerateCurrentMonthFees()}
+                  disabled={!canWriteAcademyData || isPreviewMode}
+                  className="rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
+                >
+                  Generar cuotas
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="hidden overflow-x-auto md:block">
@@ -333,8 +356,6 @@ export function FeesPage() {
               <tr>
                 <th className="px-3 py-2">Alumno</th>
                 <th className="px-3 py-2">Concepto</th>
-                <th className="px-3 py-2">Total</th>
-                <th className="px-3 py-2">Pagado</th>
                 <th className="px-3 py-2">Saldo</th>
                 <th className="px-3 py-2">Vencimiento</th>
                 <th className="px-3 py-2">Estado</th>
@@ -360,8 +381,6 @@ export function FeesPage() {
                         Periodo {formatPeriodLabel(fee.periodYear, fee.periodMonth)}
                       </p>
                     </td>
-                    <td className="px-3 py-3 font-semibold text-primary">${fee.totalAmount}</td>
-                    <td className="px-3 py-3 text-secondary">${fee.amountPaid}</td>
                     <td className="px-3 py-3 font-semibold text-warning">${fee.balance}</td>
                     <td className="px-3 py-3 text-muted">{fee.dueDate}</td>
                     <td className="px-3 py-3">
@@ -385,7 +404,7 @@ export function FeesPage() {
                             onClick={() => void handleMarkReminderSent(fee)}
                             className="rounded-brand border border-secondary/30 px-2 py-1 text-xs text-secondary hover:bg-secondary/10"
                           >
-                            Avisar
+                            Enviar recordatorio
                           </a>
                         ) : (
                           <span className="text-xs text-muted">Sin telefono</span>
@@ -397,8 +416,29 @@ export function FeesPage() {
               })}
               {feeRows.length === 0 && (
                 <tr>
-                  <td className="px-3 py-3 text-muted" colSpan={8}>
-                    No hay cuotas del periodo actual para mostrar.
+                  <td className="px-3 py-6" colSpan={6}>
+                    <div className="flex flex-col items-start gap-3 rounded-brand border border-slate-800 bg-[#0B0F1A] p-4">
+                      <p className="text-sm text-text">Todavia no tenes cuotas este mes.</p>
+                      <p className="text-xs text-muted">
+                        Crea un alumno, asignale una disciplina o genera las cuotas del periodo para empezar a cobrar.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <a href="/app/students" className="rounded-brand bg-primary px-3 py-2 text-xs font-semibold text-bg">
+                          Crear alumno
+                        </a>
+                        <a href="/app/students" className="rounded-brand border border-secondary/30 px-3 py-2 text-xs text-secondary hover:bg-secondary/10">
+                          Asignar disciplina
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => void handleGenerateCurrentMonthFees()}
+                          disabled={!canWriteAcademyData || isPreviewMode}
+                          className="rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
+                        >
+                          Generar cuotas
+                        </button>
+                      </div>
+                    </div>
                   </td>
                 </tr>
               )}
@@ -513,10 +553,10 @@ function StatusBadge({ status }: { status: FeeRecord["status"] }) {
         status === "paid"
           ? "bg-secondary/15 text-secondary"
           : status === "partial"
-            ? "bg-primary/15 text-primary"
+            ? "bg-warning/15 text-warning"
             : status === "overdue"
               ? "bg-danger/15 text-danger"
-              : "bg-warning/15 text-warning"
+              : "bg-primary/15 text-primary"
       }`}
     >
       {formatMembershipStatus(status)}
