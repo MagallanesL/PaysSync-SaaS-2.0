@@ -133,6 +133,15 @@ export function AuthEntryPanel({
     setMode(initialMode);
   }, [initialMode]);
 
+  useEffect(() => {
+    setLoginEmail("");
+    setLoginPassword("");
+    setLoginError("");
+    setRegisterForm(initialRegisterForm);
+    setRegisterError("");
+    setRegisterMessage("");
+  }, [mode]);
+
   async function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoginSubmitting(true);
@@ -294,10 +303,16 @@ export function AuthEntryPanel({
           </div>
 
           {mode === "login" ? (
-            <form onSubmit={handleLoginSubmit} className="mt-6 grid gap-4">
+            <form onSubmit={handleLoginSubmit} autoComplete="off" className="mt-6 grid gap-4">
               <div className="grid gap-4">
-                <Field label="Email" type="email" value={loginEmail} onChange={setLoginEmail} />
-                <Field label="Password" type="password" value={loginPassword} onChange={setLoginPassword} />
+                <Field label="Email" type="email" value={loginEmail} onChange={setLoginEmail} autoComplete="username" />
+                <Field
+                  label="Password"
+                  type="password"
+                  value={loginPassword}
+                  onChange={setLoginPassword}
+                  autoComplete="current-password"
+                />
               </div>
 
               <div className="rounded-[18px] border border-slate-700 bg-bg/70 p-3.5 text-sm text-muted">
@@ -330,7 +345,7 @@ export function AuthEntryPanel({
               )}
             </form>
           ) : (
-            <form onSubmit={handleRegisterSubmit} className="mt-6 grid gap-4">
+            <form onSubmit={handleRegisterSubmit} autoComplete="off" className="mt-6 grid gap-4">
               <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
                 <div className="grid gap-4 rounded-[18px] border border-slate-700/80 bg-bg/70 p-4">
                   <div>
@@ -341,6 +356,7 @@ export function AuthEntryPanel({
                     label="Nombre del centro"
                     value={registerForm.academyName}
                     onChange={(value) => setRegisterForm((prev) => ({ ...prev, academyName: value }))}
+                    autoComplete="off"
                   />
                   <SelectField
                     label="Plan"
@@ -362,12 +378,14 @@ export function AuthEntryPanel({
                     label="Tu nombre"
                     value={registerForm.ownerName}
                     onChange={(value) => setRegisterForm((prev) => ({ ...prev, ownerName: value }))}
+                    autoComplete="off"
                   />
                   <Field
                     label="Email"
                     type="email"
                     value={registerForm.ownerEmail}
                     onChange={(value) => setRegisterForm((prev) => ({ ...prev, ownerEmail: value }))}
+                    autoComplete="off"
                   />
                   <PhoneField
                     label="WhatsApp"
@@ -383,12 +401,14 @@ export function AuthEntryPanel({
                   type="password"
                   value={registerForm.password}
                   onChange={(value) => setRegisterForm((prev) => ({ ...prev, password: value }))}
+                  autoComplete="new-password"
                 />
                 <Field
                   label="Confirmar password"
                   type="password"
                   value={registerForm.confirmPassword}
                   onChange={(value) => setRegisterForm((prev) => ({ ...prev, confirmPassword: value }))}
+                  autoComplete="new-password"
                 />
               </div>
 
@@ -461,12 +481,14 @@ function Field({
   label,
   value,
   onChange,
-  type = "text"
+  type = "text",
+  autoComplete
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
+  autoComplete?: string;
 }) {
   return (
     <label className="grid gap-2 text-sm">
@@ -475,6 +497,7 @@ function Field({
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        autoComplete={autoComplete}
         className="min-h-11 rounded-[14px] border border-slate-600 bg-slate-950/70 px-3.5 py-2.5 text-text outline-none focus:border-primary"
         required
       />
@@ -530,6 +553,7 @@ function PhoneField({
         placeholder="Ingresa tu WhatsApp"
         value={value || undefined}
         onChange={(nextValue) => onChange(nextValue ?? "")}
+        autoComplete="off"
         className="phone-input min-h-11 rounded-[14px] border border-slate-600 bg-slate-950/70 px-3.5 py-2.5 focus-within:border-primary"
       />
     </label>

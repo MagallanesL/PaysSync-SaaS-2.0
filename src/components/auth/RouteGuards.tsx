@@ -15,7 +15,7 @@ function FullScreenLoader() {
 export function RootOnly({ children }: { children: ReactNode }) {
   const { loading, firebaseUser, isRoot, membership } = useAuth();
   if (loading) return <FullScreenLoader />;
-  if (!firebaseUser) return <Navigate to="/login" replace />;
+  if (!firebaseUser) return <Navigate to="/" replace />;
   if (!isRoot) {
     if (membership) return <Navigate to="/app/dashboard" replace />;
     return <Navigate to="/no-membership" replace />;
@@ -26,7 +26,7 @@ export function RootOnly({ children }: { children: ReactNode }) {
 export function AcademyOnly({ children }: { children: ReactNode }) {
   const { loading, firebaseUser, isRoot, membership } = useAuth();
   if (loading) return <FullScreenLoader />;
-  if (!firebaseUser) return <Navigate to="/login" replace />;
+  if (!firebaseUser) return <Navigate to="/" replace />;
   if (isRoot) return <Navigate to="/root/dashboard" replace />;
   if (!membership) return <Navigate to="/no-membership" replace />;
   return <>{children}</>;
@@ -35,7 +35,7 @@ export function AcademyOnly({ children }: { children: ReactNode }) {
 export function NoMembershipOnly({ children }: { children: ReactNode }) {
   const { loading, firebaseUser, isRoot, membership } = useAuth();
   if (loading) return <FullScreenLoader />;
-  if (!firebaseUser) return <Navigate to="/login" replace />;
+  if (!firebaseUser) return <Navigate to="/" replace />;
   if (isRoot) return <Navigate to="/root/dashboard" replace />;
   if (membership) return <Navigate to="/app/dashboard" replace />;
   return <>{children}</>;
