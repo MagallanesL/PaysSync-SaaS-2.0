@@ -1,8 +1,9 @@
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { httpsCallable } from "firebase/functions";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
-import { db } from "../../lib/firebase";
+import { db, functions } from "../../lib/firebase";
 import {
   DEFAULT_PLATFORM_CONFIG,
   getPlanDescription,
@@ -16,7 +17,13 @@ import {
 import { getTrialEndsAtMillis } from "../../lib/trial";
 import type { Academy, AcademyPlan } from "../../lib/types";
 
-type AcademySettings = Pick<Academy, "name" | "plan" | "status" | "planLimits" | "trial" | "createdAt">;
+type AcademySettings = Pick<Academy, "name" | "plan" | "status" | "planLimits" | "trial" | "subscription" | "createdAt">;
+type CheckoutStatusTone = "success" | "warning" | "danger";
+
+interface CheckoutStatusMessage {
+  tone: CheckoutStatusTone;
+  text: string;
+}
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
@@ -112,6 +119,38 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<AcademySettings | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
   const [studentsCount, setStudentsCount] = useState(0);
+  const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState<AcademyPlan | null>(null);
+  const [checkoutStatusMessage, setCheckoutStatusMessage] = useState<CheckoutStatusMessage | null>(null);
+  const checkoutReconcileAttemptRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const checkoutStatus = params.get("checkout_status");
+    const plan = params.get("plan");
+    if (!checkoutStatus) return;
+
+    if (checkoutStatus === "success") {
+      setCheckoutStatusMessage({
+        tone: "success",
+        text: `El pago para el plan ${plan ?? ""} fue enviado. Cuando Mercado Pago lo acredite, tu plan se activara automaticamente.`
+      });
+    } else if (checkoutStatus === "pending") {
+      setCheckoutStatusMessage({
+        tone: "warning",
+        text: "El pago quedo pendiente. Tu plan cambiara de forma automatica apenas Mercado Pago lo marque como aprobado."
+      });
+    } else if (checkoutStatus === "failure") {
+      setCheckoutStatusMessage({
+        tone: "danger",
+        text: "El pago no se completo. Puedes intentarlo nuevamente cuando quieras."
+      });
+    }
+
+    params.delete("checkout_status");
+    params.delete("plan");
+    const nextQuery = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`);
+  }, []);
 
   useEffect(() => {
     async function loadSettings() {
@@ -122,6 +161,9 @@ export function SettingsPage() {
           status: "active",
           planLimits: {
             maxStudents: 100
+          },
+          subscription: {
+            billingStatus: "paid"
           }
         });
         setStudentsCount(37);
@@ -144,6 +186,33 @@ export function SettingsPage() {
     void loadSettings();
   }, [isPreviewMode, membership]);
 
+  useEffect(() => {
+    async function reconcilePendingCheckout() {
+      if (isPreviewMode || !membership || !settings?.subscription?.pendingPlan) return;
+
+      const reconcileKey = `${membership.academyId}:${settings.subscription.pendingPlan}`;
+      if (checkoutReconcileAttemptRef.current === reconcileKey) return;
+      checkoutReconcileAttemptRef.current = reconcileKey;
+
+      try {
+        const reconcile = httpsCallable<{ academyId: string }, { processed: number }>(
+          functions,
+          "reconcileMercadoPagoPayments"
+        );
+        await reconcile({ academyId: membership.academyId });
+
+        const academySnap = await getDoc(doc(db, "academies", membership.academyId));
+        if (academySnap.exists()) {
+          setSettings(academySnap.data() as AcademySettings);
+        }
+      } catch {
+        checkoutReconcileAttemptRef.current = null;
+      }
+    }
+
+    void reconcilePendingCheckout();
+  }, [isPreviewMode, membership, settings?.subscription?.pendingPlan]);
+
   const usage = useMemo(() => {
     if (!settings) return { limit: null as number | null, usagePercent: 0, usageLabel: "0" };
     const limit = getPlanLimit(platformConfig, settings.plan);
@@ -162,9 +231,54 @@ export function SettingsPage() {
   const trialSummary = settings.status === "trial" ? getTrialSummary(settings, platformConfig.trialDurationDays) : null;
   const currentPlanPrice = getPlanPrice(platformConfig, settings.plan);
 
+  async function handlePlanCheckout(plan: AcademyPlan) {
+    if (!membership || isPreviewMode) return;
+
+    setCheckoutLoadingPlan(plan);
+    setCheckoutStatusMessage(null);
+    try {
+      const createCheckout = httpsCallable<
+        { academyId: string; plan: AcademyPlan; origin: string },
+        { initPoint: string }
+      >(functions, "createMercadoPagoCheckout");
+      const result = await createCheckout({
+        academyId: membership.academyId,
+        plan,
+        origin: window.location.origin
+      });
+
+      if (!result.data?.initPoint) {
+        throw new Error("No se recibio URL de pago.");
+      }
+
+      window.location.assign(result.data.initPoint);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo iniciar el checkout.";
+      setCheckoutStatusMessage({
+        tone: "danger",
+        text: message
+      });
+      setCheckoutLoadingPlan(null);
+    }
+  }
+
   return (
     <div className="grid gap-4">
       <Panel title="Configuracion del centro">
+        {checkoutStatusMessage && (
+          <div
+            className={`rounded-brand border px-4 py-3 text-sm ${
+              checkoutStatusMessage.tone === "success"
+                ? "border-secondary/40 bg-secondary/10 text-secondary"
+                : checkoutStatusMessage.tone === "warning"
+                  ? "border-warning/40 bg-warning/10 text-warning"
+                  : "border-danger/40 bg-danger/10 text-danger"
+            }`}
+          >
+            {checkoutStatusMessage.text}
+          </div>
+        )}
+
         <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
           <div className="grid gap-4">
             <section className="rounded-brand border border-primary/30 bg-gradient-to-br from-primary/15 via-bg to-secondary/10 p-5 shadow-soft">
@@ -303,13 +417,30 @@ export function SettingsPage() {
                       </span>
                       <button
                         type="button"
+                        onClick={() => void handlePlanCheckout(plan)}
+                        disabled={
+                          isPreviewMode ||
+                          membership?.role !== "owner" ||
+                          (settings.status === "active" && isCurrent) ||
+                          checkoutLoadingPlan !== null
+                        }
                         className={`rounded-brand px-3 py-2 text-xs font-semibold ${
                           isCurrent
-                            ? "border border-primary/40 bg-primary/15 text-primary"
-                            : "bg-primary text-bg hover:brightness-110"
+                            ? settings.status === "trial"
+                              ? "bg-primary text-bg hover:brightness-110 disabled:opacity-50"
+                              : "border border-primary/40 bg-primary/15 text-primary disabled:opacity-50"
+                            : "bg-primary text-bg hover:brightness-110 disabled:opacity-50"
                         }`}
                       >
-                        {isCurrent ? "Plan actual" : "Solicitar cambio"}
+                        {checkoutLoadingPlan === plan
+                          ? "Redirigiendo..."
+                          : isCurrent
+                            ? settings.status === "trial"
+                              ? "Pagar este plan"
+                              : "Plan actual"
+                            : settings.status === "trial"
+                              ? "Pagar y activar"
+                              : "Pagar y cambiar"}
                       </button>
                     </div>
                   </div>

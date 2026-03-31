@@ -54,6 +54,9 @@ export interface Academy {
     renewsAt?: unknown;
     lastPaidAt?: unknown;
     amount?: number;
+    pendingPlan?: AcademyPlan;
+    paymentProvider?: "mercado_pago";
+    paymentProviderPaymentId?: string;
   };
   createdAt?: unknown;
 }
