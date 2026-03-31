@@ -15,11 +15,12 @@ import {
   updateDoc,
   writeBatch
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Panel } from "../../components/ui/Panel";
 import { formatAcademyRole, formatMembershipStatus } from "../../lib/display";
-import { db, getSecondaryAuth } from "../../lib/firebase";
+import { db, functions, getSecondaryAuth } from "../../lib/firebase";
 import {
   DEFAULT_PLATFORM_CONFIG,
   getPlanLabel,
@@ -343,6 +344,7 @@ export function RootDashboardPage() {
   const [configError, setConfigError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<RootSection>("billing");
   const [activePlanSection, setActivePlanSection] = useState<ConfigPlanSection>("basic");
+  const [deletingAcademyId, setDeletingAcademyId] = useState<string | null>(null);
 
   async function loadPlatformConfig() {
     const configSnap = await getDoc(doc(db, "platform", "config"));
@@ -577,6 +579,35 @@ export function RootDashboardPage() {
       updatedAt: serverTimestamp()
     });
     await loadAcademies();
+  }
+
+  async function handleDeleteAcademy(academy: Academy) {
+    const confirmation = window.prompt(
+      `Vas a eliminar el centro "${academy.name}". Esta accion borra el centro y sus datos asociados.\n\nPara confirmar, escribe ELIMINAR`
+    );
+
+    if (confirmation !== "ELIMINAR") {
+      return;
+    }
+
+    setDeletingAcademyId(academy.id);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const deleteAcademyCallable = httpsCallable<{ academyId: string }, { academyId: string }>(functions, "deleteAcademy");
+      await deleteAcademyCallable({ academyId: academy.id });
+      if (editState?.id === academy.id) {
+        setEditState(null);
+        setActiveSection("billing");
+      }
+      setMessage(`Centro "${academy.name}" eliminado correctamente.`);
+      await loadAcademies();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo eliminar el centro.");
+    } finally {
+      setDeletingAcademyId(null);
+    }
   }
 
   async function handleSaveEdit(event: FormEvent<HTMLFormElement>) {
@@ -1224,6 +1255,13 @@ export function RootDashboardPage() {
                                 className="rounded-brand border border-slate-600 px-3 py-2 text-xs font-semibold text-muted hover:border-warning hover:text-warning"
                               >
                                 {academy.status === "suspended" ? "Habilitar" : "Suspender"}
+                              </button>
+                              <button
+                                onClick={() => void handleDeleteAcademy(academy)}
+                                disabled={deletingAcademyId === academy.id}
+                                className="rounded-brand border border-danger/50 px-3 py-2 text-xs font-semibold text-danger hover:bg-danger/10 disabled:opacity-50"
+                              >
+                                {deletingAcademyId === academy.id ? "Eliminando..." : "Eliminar"}
                               </button>
                             </div>
                           </td>

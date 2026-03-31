@@ -40,6 +40,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 const SESSION_IDLE_MINUTES = Math.max(1, Number(import.meta.env.VITE_SESSION_IDLE_MINUTES ?? "30"));
 const SESSION_IDLE_TIMEOUT_MS = SESSION_IDLE_MINUTES * 60 * 1000;
+let platformConfigCachePromise: Promise<ReturnType<typeof normalizePlatformConfig>> | null = null;
 
 async function loadUserProfile(uid: string): Promise<UserProfile | null> {
   const userRef = doc(db, "users", uid);
@@ -54,6 +55,16 @@ async function loadUserProfile(uid: string): Promise<UserProfile | null> {
   };
 }
 
+async function loadPlatformConfigCached() {
+  if (!platformConfigCachePromise) {
+    platformConfigCachePromise = getDoc(doc(db, "platform", "config")).then((configSnap) =>
+      normalizePlatformConfig(configSnap.exists() ? configSnap.data() : DEFAULT_PLATFORM_CONFIG)
+    );
+  }
+
+  return platformConfigCachePromise;
+}
+
 function isMembershipActive(status: unknown) {
   const normalized = String(status ?? "").toLowerCase().trim();
   return normalized === "active" || normalized === "activo";
@@ -61,16 +72,30 @@ function isMembershipActive(status: unknown) {
 
 async function loadActiveMembership(uid: string, email?: string): Promise<AcademyMembership | null> {
   const normalizedEmail = email?.toLowerCase().trim();
-  const configSnap = await getDoc(doc(db, "platform", "config"));
-  const platformConfig = normalizePlatformConfig(configSnap.exists() ? configSnap.data() : DEFAULT_PLATFORM_CONFIG);
-
   const ownerByUidQuery = query(collection(db, "academies"), where("owner.uid", "==", uid), limit(5));
-  const ownerByUidSnap = await getDocs(ownerByUidQuery);
+  const ownerByEmailQuery = normalizedEmail
+    ? query(collection(db, "academies"), where("owner.email", "==", normalizedEmail), limit(5))
+    : null;
+  const byUserIdQuery = query(collectionGroup(db, "users"), where("userId", "==", uid), limit(20));
+  const byEmailQuery = normalizedEmail
+    ? query(collectionGroup(db, "users"), where("email", "==", normalizedEmail), limit(20))
+    : null;
+  const byMailQuery = normalizedEmail
+    ? query(collectionGroup(db, "users"), where("mail", "==", normalizedEmail), limit(20))
+    : null;
+
+  const [platformConfig, ownerByUidSnap, ownerByEmailSnap, byUserIdSnap, byEmailSnap, byMailSnap] = await Promise.all([
+    loadPlatformConfigCached(),
+    getDocs(ownerByUidQuery),
+    ownerByEmailQuery ? getDocs(ownerByEmailQuery) : Promise.resolve(null),
+    getDocs(byUserIdQuery),
+    byEmailQuery ? getDocs(byEmailQuery) : Promise.resolve(null),
+    byMailQuery ? getDocs(byMailQuery) : Promise.resolve(null)
+  ]);
+
   let ownerAcademyDoc = ownerByUidSnap.docs.find((docSnap) => docSnap.data().status !== "suspended");
 
-  if (!ownerAcademyDoc && normalizedEmail) {
-    const ownerByEmailQuery = query(collection(db, "academies"), where("owner.email", "==", normalizedEmail), limit(5));
-    const ownerByEmailSnap = await getDocs(ownerByEmailQuery);
+  if (!ownerAcademyDoc && ownerByEmailSnap) {
     ownerAcademyDoc = ownerByEmailSnap.docs.find((docSnap) => docSnap.data().status !== "suspended");
   }
 
@@ -95,7 +120,7 @@ async function loadActiveMembership(uid: string, email?: string): Promise<Academ
       return null;
     }
 
-    await setDoc(
+    void setDoc(
       doc(db, `academies/${ownerAcademyDoc.id}/users/${uid}`),
       {
         userId: uid,
@@ -118,19 +143,12 @@ async function loadActiveMembership(uid: string, email?: string): Promise<Academ
     };
   }
 
-  // Single-filter query avoids requiring a composite index for userId+status.
-  const byUserIdQuery = query(collectionGroup(db, "users"), where("userId", "==", uid), limit(20));
-  const byUserIdSnap = await getDocs(byUserIdQuery);
   let membershipDoc = byUserIdSnap.docs.find((docSnap) => isMembershipActive(docSnap.data().status));
 
-  if (!membershipDoc && email) {
-    const byEmailQuery = query(collectionGroup(db, "users"), where("email", "==", email.toLowerCase().trim()), limit(20));
-    const byEmailSnap = await getDocs(byEmailQuery);
+  if (!membershipDoc && byEmailSnap) {
     membershipDoc = byEmailSnap.docs.find((docSnap) => isMembershipActive(docSnap.data().status));
   }
-  if (!membershipDoc && email) {
-    const byMailQuery = query(collectionGroup(db, "users"), where("mail", "==", email.toLowerCase().trim()), limit(20));
-    const byMailSnap = await getDocs(byMailQuery);
+  if (!membershipDoc && byMailSnap) {
     membershipDoc = byMailSnap.docs.find((docSnap) => isMembershipActive(docSnap.data().status));
   }
 

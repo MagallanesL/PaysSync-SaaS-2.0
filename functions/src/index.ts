@@ -37,6 +37,10 @@ interface CreateAcademyUserPayload {
   password?: string;
 }
 
+interface DeleteAcademyPayload {
+  academyId: string;
+}
+
 interface RegisterAcademyPayload {
   academyName: string;
   plan: Plan;
@@ -549,6 +553,20 @@ function validateCreateAcademyUserPayload(data: unknown): CreateAcademyUserPaylo
     role: payload.role,
     password
   };
+}
+
+function validateDeleteAcademyPayload(data: unknown): DeleteAcademyPayload {
+  if (!data || typeof data !== "object") {
+    throw new HttpsError("invalid-argument", "Payload invalido.");
+  }
+
+  const payload = data as Partial<DeleteAcademyPayload>;
+  const academyId = payload.academyId?.trim() ?? "";
+  if (!academyId) {
+    throw new HttpsError("invalid-argument", "academyId es requerido.");
+  }
+
+  return { academyId };
 }
 
 function validateRegisterAcademyPayload(data: unknown): RegisterAcademyPayload {
@@ -1130,6 +1148,89 @@ export const createAcademyUser = onCall(callableOptions, async (request) => {
     });
     throw new HttpsError("internal", "No se pudo crear el usuario.");
   }
+});
+
+export const deleteAcademy = onCall(callableOptions, async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "Debes iniciar sesion.");
+  }
+
+  const callerSnap = await db.doc(`users/${request.auth.uid}`).get();
+  const callerRole = String(callerSnap.data()?.platformRole ?? callerSnap.data()?.role ?? "").trim();
+  if (!callerSnap.exists || callerRole !== "root") {
+    throw new HttpsError("permission-denied", "Solo root puede eliminar centros.");
+  }
+
+  const payload = validateDeleteAcademyPayload(request.data);
+  const academyRef = db.doc(`academies/${payload.academyId}`);
+  const academySnap = await academyRef.get();
+  if (!academySnap.exists) {
+    throw new HttpsError("not-found", "La academia indicada no existe.");
+  }
+
+  const academyUsersSnap = await academyRef.collection("users").get();
+  const academyUsers = academyUsersSnap.docs.map((docSnap) => {
+    const data = docSnap.data() as { userId?: string; email?: string };
+    return {
+      uid: String(data.userId ?? docSnap.id).trim(),
+      email: String(data.email ?? "").trim().toLowerCase()
+    };
+  });
+
+  await db.recursiveDelete(academyRef);
+
+  let deletedAuthUsers = 0;
+  let deletedUserProfiles = 0;
+
+  for (const academyUser of academyUsers) {
+    if (!academyUser.uid) continue;
+
+    const [userProfileSnap, remainingMembershipsSnap] = await Promise.all([
+      db.doc(`users/${academyUser.uid}`).get(),
+      db.collectionGroup("users").where("userId", "==", academyUser.uid).limit(2).get()
+    ]);
+
+    const hasOtherMemberships = remainingMembershipsSnap.docs.some((docSnap) => {
+      const parentAcademyId = docSnap.ref.parent.parent?.id;
+      return parentAcademyId && parentAcademyId !== payload.academyId;
+    });
+
+    if (hasOtherMemberships) continue;
+
+    const platformRole = String(userProfileSnap.data()?.platformRole ?? userProfileSnap.data()?.role ?? "user").trim();
+    if (platformRole === "root") continue;
+
+    if (userProfileSnap.exists) {
+      await userProfileSnap.ref.delete();
+      deletedUserProfiles += 1;
+    }
+
+    try {
+      await adminAuth.deleteUser(academyUser.uid);
+      deletedAuthUsers += 1;
+    } catch (error) {
+      const authError = error as { code?: string };
+      if (authError.code !== "auth/user-not-found") {
+        logger.error("deleteAcademy auth cleanup failed", {
+          academyId: payload.academyId,
+          uid: academyUser.uid,
+          error
+        });
+      }
+    }
+  }
+
+  logger.info("academy deleted by root", {
+    academyId: payload.academyId,
+    deletedAuthUsers,
+    deletedUserProfiles
+  });
+
+  return {
+    academyId: payload.academyId,
+    deletedAuthUsers,
+    deletedUserProfiles
+  };
 });
 
 export const createMercadoPagoCheckout = onCall(callableOptions, async (request) => {
