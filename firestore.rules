@@ -134,6 +134,11 @@ service cloud.firestore {
       allow create, update, delete: if isRoot() || canWriteAcademyData(academyId);
     }
 
+    match /academies/{academyId}/enrollments/{enrollmentId} {
+      allow read: if isRoot() || isAcademyMember(academyId);
+      allow create, update, delete: if isRoot() || canWriteAcademyData(academyId);
+    }
+
     match /academies/{academyId}/fees/{feeId} {
       allow read: if isRoot() || isAcademyMember(academyId);
       allow create, update, delete: if isRoot() || canWriteAcademyData(academyId);

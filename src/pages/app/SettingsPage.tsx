@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, serverTimestamp, updateDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel } from "../../components/ui/Panel";
@@ -17,7 +17,7 @@ import {
 import { getTrialEndsAtMillis } from "../../lib/trial";
 import type { Academy, AcademyPlan } from "../../lib/types";
 
-type AcademySettings = Pick<Academy, "name" | "plan" | "status" | "planLimits" | "trial" | "subscription" | "createdAt">;
+type AcademySettings = Pick<Academy, "name" | "plan" | "status" | "planLimits" | "trial" | "subscription" | "createdAt" | "operations">;
 type CheckoutStatusTone = "success" | "warning" | "danger";
 
 interface CheckoutStatusMessage {
@@ -115,12 +115,14 @@ function getPlanTone(plan: AcademyPlan, isCurrent: boolean) {
 }
 
 export function SettingsPage() {
-  const { membership, profile, isPreviewMode } = useAuth();
+  const { membership, profile, isPreviewMode, canWriteAcademyData } = useAuth();
   const [settings, setSettings] = useState<AcademySettings | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
   const [studentsCount, setStudentsCount] = useState(0);
   const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState<AcademyPlan | null>(null);
   const [checkoutStatusMessage, setCheckoutStatusMessage] = useState<CheckoutStatusMessage | null>(null);
+  const [defaultBillingDay, setDefaultBillingDay] = useState("10");
+  const [billingDayStatus, setBillingDayStatus] = useState<string | null>(null);
   const checkoutReconcileAttemptRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -164,10 +166,14 @@ export function SettingsPage() {
           },
           subscription: {
             billingStatus: "paid"
+          },
+          operations: {
+            defaultBillingDay: 10
           }
         });
         setStudentsCount(37);
         setPlatformConfig(DEFAULT_PLATFORM_CONFIG);
+        setDefaultBillingDay("10");
         return;
       }
       if (!membership) return;
@@ -178,7 +184,9 @@ export function SettingsPage() {
         getDocs(collection(db, `${academyPath}/students`))
       ]);
       if (academySnap.exists()) {
-        setSettings(academySnap.data() as AcademySettings);
+        const academyData = academySnap.data() as AcademySettings;
+        setSettings(academyData);
+        setDefaultBillingDay(String(academyData.operations?.defaultBillingDay ?? 10));
       }
       setStudentsCount(studentsSnap.size);
       setPlatformConfig(normalizePlatformConfig(configSnap.exists() ? configSnap.data() : undefined));
@@ -230,6 +238,32 @@ export function SettingsPage() {
 
   const trialSummary = settings.status === "trial" ? getTrialSummary(settings, platformConfig.trialDurationDays) : null;
   const currentPlanPrice = getPlanPrice(platformConfig, settings.plan);
+
+  async function handleSaveBillingDay() {
+    if (!membership || isPreviewMode || !canWriteAcademyData) return;
+
+    const parsedDay = Math.min(28, Math.max(1, Math.round(Number(defaultBillingDay || 10))));
+    await updateDoc(doc(db, "academies", membership.academyId), {
+      operations: {
+        ...(settings?.operations ?? {}),
+        defaultBillingDay: parsedDay
+      },
+      updatedAt: serverTimestamp()
+    });
+    setBillingDayStatus(`Vencimiento por defecto actualizado al dia ${parsedDay}.`);
+    setSettings((prev) =>
+      prev
+        ? {
+            ...prev,
+            operations: {
+              ...(prev.operations ?? {}),
+              defaultBillingDay: parsedDay
+            }
+          }
+        : prev
+    );
+    setDefaultBillingDay(String(parsedDay));
+  }
 
   async function handlePlanCheckout(plan: AcademyPlan) {
     if (!membership || isPreviewMode) return;
@@ -370,6 +404,42 @@ export function SettingsPage() {
                   )}
                 </div>
               </div>
+            </section>
+
+            <section className="rounded-brand border border-slate-700 bg-bg p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted">Cobranza operativa</p>
+                  <p className="mt-2 text-sm text-muted">
+                    Define el dia de vencimiento por defecto para nuevas asignaciones y nuevas cuotas mensuales.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <label className="grid gap-1 text-sm text-muted">
+                    Dia de vencimiento
+                    <input
+                      type="number"
+                      min="1"
+                      max="28"
+                      value={defaultBillingDay}
+                      onChange={(event) => setDefaultBillingDay(event.target.value)}
+                      className="rounded-brand border border-slate-600 bg-slate-950/30 px-3 py-2 text-text outline-none focus:border-primary"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveBillingDay()}
+                    disabled={!canWriteAcademyData || isPreviewMode}
+                    className="rounded-brand bg-primary px-4 py-2 text-sm font-semibold text-bg disabled:opacity-40"
+                  >
+                    Guardar
+                  </button>
+                </div>
+              </div>
+              <p className="mt-3 text-xs text-muted">
+                Este ajuste se aplica a nuevas cuotas. No modifica periodos ya generados.
+              </p>
+              {billingDayStatus ? <p className="mt-2 text-xs text-secondary">{billingDayStatus}</p> : null}
             </section>
           </div>
 

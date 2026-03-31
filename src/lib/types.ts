@@ -58,5 +58,8 @@ export interface Academy {
     paymentProvider?: "mercado_pago";
     paymentProviderPaymentId?: string;
   };
+  operations?: {
+    defaultBillingDay?: number;
+  };
   createdAt?: unknown;
 }

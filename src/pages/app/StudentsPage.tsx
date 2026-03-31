@@ -1,55 +1,40 @@
 import {
-  addDoc,
   collection,
   doc,
   getDoc,
-  getDocs,
-  orderBy,
-  query,
   serverTimestamp,
-  updateDoc
+  updateDoc,
+  writeBatch
 } from "firebase/firestore";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
-import { formatBillingType, formatMembershipStatus } from "../../lib/display";
+import {
+  generateFeeForEnrollmentPeriod,
+  getCurrentPeriodParts,
+  loadAcademyBillingSnapshot,
+  type AcademyBillingSnapshot,
+  type AssignedDisciplineSnapshot,
+  type DisciplineRecord,
+  type EnrollmentRecord
+} from "../../lib/academyBilling";
+import { formatMembershipStatus } from "../../lib/display";
 import { db } from "../../lib/firebase";
-import type { FeeCategory, FeePaymentMode } from "../../lib/fees";
-import { DEFAULT_PLATFORM_CONFIG, getPlanLabel, getPlanLimit, normalizePlatformConfig, type PlatformConfig } from "../../lib/plans";
+import {
+  DEFAULT_PLATFORM_CONFIG,
+  getPlanLabel,
+  getPlanLimit,
+  normalizePlatformConfig,
+  type PlatformConfig
+} from "../../lib/plans";
 import type { AcademyPlan } from "../../lib/types";
-
-interface Student {
-  id: string;
-  fullName: string;
-  email: string;
-  phone: string;
-  emergencyContactName: string;
-  contactPhone: string;
-  allergies: string;
-  status: "active" | "inactive";
-  disciplines?: AssignedDiscipline[];
-}
-
-interface AssignedDiscipline {
-  disciplineId: string;
-  name: string;
-  billingType: FeeCategory;
-  paymentMode?: FeePaymentMode;
-  allowPartial?: boolean;
-  price: number;
-}
-
-interface DisciplineOption extends AssignedDiscipline {
-  id: string;
-  active: boolean;
-}
 
 interface StudentFormState {
   fullName: string;
   email: string;
   phone: string;
   emergencyContactName: string;
-  contactPhone: string;
+  emergencyContactPhone: string;
   allergies: string;
   disciplineIds: string[];
 }
@@ -59,55 +44,78 @@ const emptyForm: StudentFormState = {
   email: "",
   phone: "",
   emergencyContactName: "",
-  contactPhone: "",
+  emergencyContactPhone: "",
   allergies: "",
   disciplineIds: []
 };
 
-function sortStudents(items: Student[]) {
+function sortStudents<T extends { fullName: string; status: "active" | "inactive" }>(items: T[]) {
   return [...items].sort((a, b) => {
-    if (a.status !== b.status) {
-      return a.status === "active" ? -1 : 1;
-    }
+    if (a.status !== b.status) return a.status === "active" ? -1 : 1;
     return a.fullName.localeCompare(b.fullName, "es", { sensitivity: "base" });
   });
 }
 
 export function StudentsPage() {
   const { membership, canWriteAcademyData, isPreviewMode } = useAuth();
-  const [students, setStudents] = useState<Student[]>([]);
+  const [snapshot, setSnapshot] = useState<AcademyBillingSnapshot | null>(null);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | Student["status"]>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [debtFilter, setDebtFilter] = useState<"all" | "with_debt" | "without_debt">("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<StudentFormState>(emptyForm);
   const [plan, setPlan] = useState<AcademyPlan>("basic");
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
   const [error, setError] = useState<string | null>(null);
-  const [disciplines, setDisciplines] = useState<DisciplineOption[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const academyPath = membership ? `academies/${membership.academyId}` : null;
-
-  async function loadStudents() {
+  async function loadData() {
     if (isPreviewMode) {
-      setStudents(
-        sortStudents([
+      setSnapshot({
+        defaultBillingDay: 10,
+        disciplines: [
+          {
+            id: "disc-1",
+            centerId: "demo",
+            name: "Voley",
+            category: "monthly_fee",
+            modality: "Adultos",
+            baseAmount: 20000,
+            billingType: "monthly",
+            active: true,
+            allowPartial: true,
+            note: ""
+          },
+          {
+            id: "disc-2",
+            centerId: "demo",
+            name: "Danza",
+            category: "monthly_fee",
+            modality: "Kids",
+            baseAmount: 18000,
+            billingType: "monthly",
+            active: true,
+            allowPartial: true,
+            note: ""
+          }
+        ],
+        students: [
           {
             id: "student-1",
             fullName: "Ana Perez",
             email: "ana@demo.com",
             phone: "11-5555-1111",
             emergencyContactName: "Laura Perez",
-            contactPhone: "11-4444-1111",
+            emergencyContactPhone: "11-4444-1111",
             allergies: "Alergia al mani",
             status: "active",
             disciplines: [
               {
                 disciplineId: "disc-1",
-                name: "Freestyle",
+                name: "Voley",
                 billingType: "monthly_fee",
                 paymentMode: "monthly",
-                allowPartial: false,
+                allowPartial: true,
                 price: 20000
               }
             ]
@@ -115,164 +123,302 @@ export function StudentsPage() {
           {
             id: "student-2",
             fullName: "Bruno Diaz",
-            email: "bruno@demo.com",
+            email: "",
             phone: "11-5555-2222",
-            emergencyContactName: "Carlos Diaz",
-            contactPhone: "11-4444-2222",
+            emergencyContactName: "",
+            emergencyContactPhone: "",
             allergies: "",
             status: "inactive",
             disciplines: []
           }
-        ])
-      );
-      setDisciplines([
-        {
-          id: "disc-1",
-          disciplineId: "disc-1",
-          name: "Freestyle",
-          billingType: "monthly_fee",
-          paymentMode: "monthly",
-          allowPartial: false,
-          price: 20000,
-          active: true
-        },
-        {
-          id: "disc-2",
-          disciplineId: "disc-2",
-          name: "Indumentaria",
-          billingType: "uniform",
-          paymentMode: "one_time",
-          allowPartial: true,
-          price: 12000,
-          active: true
-        }
-      ]);
+        ],
+        enrollments: [
+          {
+            id: "enr-1",
+            centerId: "demo",
+            studentId: "student-1",
+            disciplineId: "disc-1",
+            startDate: "2026-03-03",
+            active: true,
+            billingDay: 10
+          }
+        ],
+        fees: [
+          {
+            id: "fee-1",
+            centerId: "demo",
+            studentId: "student-1",
+            disciplineId: "disc-1",
+            enrollmentId: "enr-1",
+            concept: "Voley - 03/2026",
+            periodYear: 2026,
+            periodMonth: 3,
+            dueDate: "2026-03-10",
+            originalAmount: 20000,
+            amountPaid: 8000,
+            balance: 12000,
+            status: "partial",
+            lateFeeAmount: 0,
+            totalAmount: 20000,
+            reminderStatus: "not_sent",
+            paymentMode: "monthly",
+            partialAllowed: true,
+            studentName: "Ana Perez",
+            disciplineName: "Voley"
+          }
+        ],
+        payments: []
+      });
       setPlan("pro");
+      setPlatformConfig(DEFAULT_PLATFORM_CONFIG);
       return;
     }
 
-    if (!academyPath || !membership) return;
-    const [studentsSnap, academySnap, disciplinesSnap, configSnap] = await Promise.all([
-      getDocs(query(collection(db, `${academyPath}/students`), orderBy("fullName", "asc"))),
+    if (!membership) return;
+    const [billingSnapshot, academySnap, configSnap] = await Promise.all([
+      loadAcademyBillingSnapshot(membership.academyId),
       getDoc(doc(db, "academies", membership.academyId)),
-      getDocs(query(collection(db, `${academyPath}/disciplines`), orderBy("name", "asc"))),
       getDoc(doc(db, "platform", "config"))
     ]);
-    setStudents(
-      sortStudents(
-        studentsSnap.docs.map((d) => {
-          const data = d.data();
-          return {
-            id: d.id,
-            fullName: String(data.fullName ?? ""),
-            email: String(data.email ?? ""),
-            phone: String(data.phone ?? ""),
-            emergencyContactName: String(data.emergencyContactName ?? ""),
-            contactPhone: String(data.contactPhone ?? ""),
-            allergies: String(data.allergies ?? ""),
-            status: (data.status as Student["status"]) ?? "active",
-            disciplines: (data.disciplines as AssignedDiscipline[] | undefined) ?? []
-          };
-        })
-      )
-    );
-    setDisciplines(
-      disciplinesSnap.docs.map((d) => ({
-        id: d.id,
-        disciplineId: d.id,
-        name: String(d.data().name ?? ""),
-        billingType: d.data().billingType as DisciplineOption["billingType"],
-        paymentMode: (d.data().paymentMode as DisciplineOption["paymentMode"] | undefined) ?? undefined,
-        allowPartial: Boolean(d.data().allowPartial ?? false),
-        price: Number(d.data().price ?? 0),
-        active: Boolean(d.data().active ?? true)
-      }))
-    );
-    if (academySnap.exists()) {
-      setPlan(academySnap.data().plan as AcademyPlan);
-    }
+
+    setSnapshot(billingSnapshot);
+    setPlan((academySnap.data()?.plan as AcademyPlan | undefined) ?? "basic");
     setPlatformConfig(normalizePlatformConfig(configSnap.exists() ? configSnap.data() : undefined));
   }
 
   useEffect(() => {
-    void loadStudents();
-  }, [academyPath, isPreviewMode]);
-
-  const maxStudents = useMemo(() => getPlanLimit(platformConfig, plan), [plan, platformConfig]);
+    void loadData();
+  }, [isPreviewMode, membership?.academyId]);
 
   useEffect(() => {
     if (!isModalOpen) return;
-
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape") closeModal();
     }
-
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
   }, [isModalOpen]);
 
+  const disciplines = useMemo(
+    () => (snapshot?.disciplines ?? []).filter((discipline) => discipline.active),
+    [snapshot]
+  );
+
+  const activeStudentsCount = useMemo(
+    () => (snapshot?.students ?? []).filter((student) => student.status === "active").length,
+    [snapshot]
+  );
+
+  const maxStudents = useMemo(() => getPlanLimit(platformConfig, plan), [platformConfig, plan]);
+
+  const studentRows = useMemo(() => {
+    if (!snapshot) return [];
+
+    return sortStudents(
+      snapshot.students.map((student) => {
+        const activeEnrollments = snapshot.enrollments.filter(
+          (enrollment) => enrollment.studentId === student.id && enrollment.active
+        );
+        const activeFees = snapshot.fees.filter(
+          (fee) => fee.studentId === student.id && activeEnrollments.some((enrollment) => enrollment.id === fee.enrollmentId)
+        );
+        const pendingBalance = activeFees.reduce((sum, fee) => sum + fee.balance, 0);
+        const overdueCount = activeFees.filter((fee) => fee.status === "overdue").length;
+        const currentStatus =
+          overdueCount > 0
+            ? "Vencida"
+            : pendingBalance > 0
+              ? "Saldo pendiente"
+              : activeFees.length > 0
+                ? "Al dia"
+                : "Sin cuotas";
+
+        return {
+          ...student,
+          disciplines: student.disciplines,
+          pendingBalance,
+          currentStatus
+        };
+      })
+    );
+  }, [snapshot]);
+
+  const visibleStudents = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return studentRows.filter((student) => {
+      const matchesStatus = statusFilter === "all" || student.status === statusFilter;
+      const matchesDebt =
+        debtFilter === "all" ||
+        (debtFilter === "with_debt" ? student.pendingBalance > 0 : student.pendingBalance === 0);
+      const disciplineLabel = student.disciplines.map((discipline) => discipline.name).join(" ").toLowerCase();
+      const matchesSearch =
+        !term ||
+        student.fullName.toLowerCase().includes(term) ||
+        student.email.toLowerCase().includes(term) ||
+        student.phone.toLowerCase().includes(term) ||
+        disciplineLabel.includes(term);
+      return matchesStatus && matchesDebt && matchesSearch;
+    });
+  }, [debtFilter, search, statusFilter, studentRows]);
+
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canWriteAcademyData || !academyPath || isPreviewMode) return;
+    if (!membership || !snapshot || !canWriteAcademyData || isPreviewMode) return;
+
+    const trimmedName = form.fullName.trim();
+    const trimmedEmail = form.email.trim();
+    const trimmedPhone = form.phone.trim();
 
     setError(null);
-    if (!editingId && maxStudents !== null && students.filter((student) => student.status === "active").length >= maxStudents) {
+
+    if (!trimmedName) {
+      setError("El nombre es obligatorio.");
+      return;
+    }
+    if (!trimmedEmail && !trimmedPhone) {
+      setError("Carga al menos un contacto basico: email o telefono.");
+      return;
+    }
+    if (!editingId && maxStudents !== null && activeStudentsCount >= maxStudents) {
       setError(`Limite alcanzado para plan ${getPlanLabel(platformConfig, plan)}: ${maxStudents} alumnos activos.`);
       return;
     }
 
-    const assignedDisciplines = disciplines
-      .filter((discipline) => form.disciplineIds.includes(discipline.id))
-      .map((discipline) => ({
+    const academyId = membership.academyId;
+    const academyPath = `academies/${academyId}`;
+    const studentRef = editingId
+      ? doc(db, `${academyPath}/students`, editingId)
+      : doc(collection(db, `${academyPath}/students`));
+    const selectedDisciplines = disciplines.filter((discipline) => form.disciplineIds.includes(discipline.id));
+    const disciplineSnapshot: AssignedDisciplineSnapshot[] = selectedDisciplines.map((discipline) => ({
+      disciplineId: discipline.id,
+      name: discipline.name,
+      billingType: discipline.category,
+      paymentMode: "monthly",
+      allowPartial: discipline.allowPartial,
+      price: discipline.baseAmount
+    }));
+    const currentStudent = snapshot.students.find((student) => student.id === editingId);
+    const nextStatus = currentStudent?.status ?? "active";
+    const existingEnrollments = snapshot.enrollments.filter((enrollment) => enrollment.studentId === studentRef.id);
+    const activeEnrollmentByDisciplineId = new Map(
+      existingEnrollments.filter((enrollment) => enrollment.active).map((enrollment) => [enrollment.disciplineId, enrollment])
+    );
+    const inactiveEnrollmentByDisciplineId = new Map(
+      existingEnrollments.filter((enrollment) => !enrollment.active).map((enrollment) => [enrollment.disciplineId, enrollment])
+    );
+    const batch = writeBatch(db);
+    const today = new Date();
+    const startDate = today.toISOString().slice(0, 10);
+    const enrollmentsToEnsureFee: Array<{ enrollment: EnrollmentRecord; discipline: DisciplineRecord }> = [];
+
+    batch.set(
+      studentRef,
+      {
+        fullName: trimmedName,
+        email: trimmedEmail,
+        phone: trimmedPhone,
+        emergencyContactName: form.emergencyContactName.trim(),
+        emergencyContactPhone: form.emergencyContactPhone.trim(),
+        contactPhone: form.emergencyContactPhone.trim(),
+        allergies: form.allergies.trim(),
+        status: nextStatus,
+        disciplines: disciplineSnapshot,
+        updatedAt: serverTimestamp(),
+        ...(editingId ? {} : { createdAt: serverTimestamp() })
+      },
+      { merge: true }
+    );
+
+    const selectedIds = new Set(selectedDisciplines.map((discipline) => discipline.id));
+
+    for (const discipline of selectedDisciplines) {
+      const existingActive = activeEnrollmentByDisciplineId.get(discipline.id);
+      if (existingActive) {
+        enrollmentsToEnsureFee.push({ enrollment: existingActive, discipline });
+        continue;
+      }
+
+      const inactiveEnrollment = inactiveEnrollmentByDisciplineId.get(discipline.id);
+      if (inactiveEnrollment) {
+        const reactivatedEnrollment: EnrollmentRecord = {
+          ...inactiveEnrollment,
+          active: true,
+          startDate,
+          billingDay: inactiveEnrollment.billingDay ?? snapshot.defaultBillingDay
+        };
+        batch.set(
+          doc(db, `${academyPath}/enrollments`, inactiveEnrollment.id),
+          {
+            active: true,
+            startDate,
+            billingDay: inactiveEnrollment.billingDay ?? snapshot.defaultBillingDay,
+            updatedAt: serverTimestamp()
+          },
+          { merge: true }
+        );
+        enrollmentsToEnsureFee.push({ enrollment: reactivatedEnrollment, discipline });
+        continue;
+      }
+
+      const enrollmentRef = doc(collection(db, `${academyPath}/enrollments`));
+      const newEnrollment: EnrollmentRecord = {
+        id: enrollmentRef.id,
+        centerId: academyId,
+        studentId: studentRef.id,
         disciplineId: discipline.id,
-        name: discipline.name,
-        billingType: discipline.billingType,
-        paymentMode: discipline.paymentMode,
-        allowPartial: discipline.allowPartial,
-        price: discipline.price
-      }));
+        startDate,
+        active: true,
+        billingDay: snapshot.defaultBillingDay
+      };
+      batch.set(enrollmentRef, {
+        centerId: academyId,
+        studentId: studentRef.id,
+        disciplineId: discipline.id,
+        startDate,
+        active: true,
+        billingDay: snapshot.defaultBillingDay,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      enrollmentsToEnsureFee.push({ enrollment: newEnrollment, discipline });
+    }
 
-    const payload = {
-      fullName: form.fullName,
-      email: form.email,
-      phone: form.phone,
-      emergencyContactName: form.emergencyContactName.trim(),
-      contactPhone: form.contactPhone,
-      allergies: form.allergies.trim(),
-      status: editingId ? students.find((student) => student.id === editingId)?.status ?? "active" : "active",
-      disciplines: assignedDisciplines,
-      updatedAt: serverTimestamp()
-    };
+    for (const enrollment of existingEnrollments.filter(
+      (item) => item.active && !selectedIds.has(item.disciplineId)
+    )) {
+      batch.update(doc(db, `${academyPath}/enrollments`, enrollment.id), {
+        active: false,
+        updatedAt: serverTimestamp()
+      });
+    }
 
-    if (editingId) {
-      await updateDoc(doc(db, `${academyPath}/students`, editingId), payload);
-    } else {
-      await addDoc(collection(db, `${academyPath}/students`), {
-        ...payload,
-        createdAt: serverTimestamp()
+    await batch.commit();
+
+    const { year, month } = getCurrentPeriodParts(today);
+    for (const item of enrollmentsToEnsureFee) {
+      await generateFeeForEnrollmentPeriod({
+        academyId,
+        enrollment: item.enrollment,
+        discipline: item.discipline,
+        studentName: trimmedName,
+        periodYear: year,
+        periodMonth: month,
+        defaultBillingDay: snapshot.defaultBillingDay
       });
     }
 
     closeModal();
-    await loadStudents();
+    await loadData();
   }
 
-  async function handleToggleStatus(student: Student) {
-    if (!canWriteAcademyData || isPreviewMode) return;
-
-    const nextStatus: Student["status"] = student.status === "active" ? "inactive" : "active";
-    if (academyPath) {
-      await updateDoc(doc(db, `${academyPath}/students`, student.id), {
-        status: nextStatus,
-        updatedAt: serverTimestamp()
-      });
-      await loadStudents();
-      return;
-    }
-
-    setStudents((prev) =>
-      sortStudents(prev.map((item) => (item.id === student.id ? { ...item, status: nextStatus } : item)))
-    );
+  async function handleToggleStatus(studentId: string, currentStatus: "active" | "inactive") {
+    if (!membership || !canWriteAcademyData || isPreviewMode) return;
+    await updateDoc(doc(db, `academies/${membership.academyId}/students`, studentId), {
+      status: currentStatus === "active" ? "inactive" : "active",
+      updatedAt: serverTimestamp()
+    });
+    await loadData();
   }
 
   function openCreateModal() {
@@ -282,40 +428,30 @@ export function StudentsPage() {
     setIsModalOpen(true);
   }
 
-  function onEdit(student: Student) {
+  function onEdit(studentId: string) {
+    const student = snapshot?.students.find((item) => item.id === studentId);
+    if (!student) return;
+
     setEditingId(student.id);
     setForm({
       fullName: student.fullName,
       email: student.email,
       phone: student.phone,
       emergencyContactName: student.emergencyContactName,
-      contactPhone: student.contactPhone,
+      emergencyContactPhone: student.emergencyContactPhone,
       allergies: student.allergies,
-      disciplineIds: (student.disciplines ?? []).map((discipline) => discipline.disciplineId)
+      disciplineIds: student.disciplines.map((discipline) => discipline.disciplineId)
     });
     setError(null);
     setIsModalOpen(true);
   }
 
   function closeModal() {
-    setIsModalOpen(false);
     setEditingId(null);
     setForm(emptyForm);
     setError(null);
+    setIsModalOpen(false);
   }
-
-  const activeStudents = students.filter((student) => student.status === "active").length;
-  const visibleStudents = students.filter((student) => {
-    const matchesStatus = statusFilter === "all" || student.status === statusFilter;
-    const disciplinesLabel = (student.disciplines ?? []).map((discipline) => discipline.name).join(" ").toLowerCase();
-    const matchesSearch =
-      !search.trim() ||
-      student.fullName.toLowerCase().includes(search.toLowerCase()) ||
-      student.email.toLowerCase().includes(search.toLowerCase()) ||
-      student.phone.toLowerCase().includes(search.toLowerCase()) ||
-      disciplinesLabel.includes(search.toLowerCase());
-    return matchesStatus && matchesSearch;
-  });
 
   return (
     <>
@@ -332,20 +468,20 @@ export function StudentsPage() {
           </button>
         }
       >
-        <div className="mb-4 grid gap-3 rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#0B0F1A] p-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="mb-4 grid gap-3 rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#0B0F1A] p-4 xl:grid-cols-[1.1fr_1fr]">
           <div>
-            <p className="text-xs uppercase tracking-[0.24em] text-[#9FB0D0]">Base de alumnos</p>
+            <p className="text-xs uppercase tracking-[0.24em] text-[#9FB0D0]">Base operativa</p>
             <p className="mt-2 text-sm text-[#9FB0D0]">
-              Busca rapido, filtra por estado y deja los datos secundarios para el detalle de edicion.
+              Crea alumnos, asigna disciplinas activas y deja listo el alta para generar la cuota inicial del periodo.
             </p>
           </div>
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+          <div className="grid gap-3 md:grid-cols-3">
             <label className="grid gap-1 text-sm text-[#9FB0D0]">
               Buscar
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Nombre, email, telefono o disciplina"
+                placeholder="Nombre, contacto o disciplina"
                 className="min-w-0 rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#121A2B] px-3 py-2 text-[#F5F7FB] outline-none focus:border-[#00D1FF]"
               />
             </label>
@@ -353,26 +489,36 @@ export function StudentsPage() {
               Estado
               <select
                 value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as "all" | Student["status"])}
-                className="w-full rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#121A2B] px-3 py-2 text-[#F5F7FB] outline-none focus:border-[#00D1FF]"
+                onChange={(event) => setStatusFilter(event.target.value as "all" | "active" | "inactive")}
+                className="rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#121A2B] px-3 py-2 text-[#F5F7FB] outline-none focus:border-[#00D1FF]"
               >
                 <option value="all">Todos</option>
                 <option value="active">Activos</option>
                 <option value="inactive">Inactivos</option>
               </select>
             </label>
+            <label className="grid gap-1 text-sm text-[#9FB0D0]">
+              Deuda
+              <select
+                value={debtFilter}
+                onChange={(event) => setDebtFilter(event.target.value as "all" | "with_debt" | "without_debt")}
+                className="rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#121A2B] px-3 py-2 text-[#F5F7FB] outline-none focus:border-[#00D1FF]"
+              >
+                <option value="all">Todos</option>
+                <option value="with_debt">Con deuda</option>
+                <option value="without_debt">Sin deuda</option>
+              </select>
+            </label>
           </div>
         </div>
 
         <p className="mb-3 text-xs text-muted">
-          Plan actual: <span className="uppercase text-primary">{getPlanLabel(platformConfig, plan)}</span> | Limite: {maxStudents ?? "Ilimitado"} | Activos: {activeStudents} | Total: {students.length}
+          Plan actual: <span className="uppercase text-primary">{getPlanLabel(platformConfig, plan)}</span> | Limite: {maxStudents ?? "Ilimitado"} | Activos: {activeStudentsCount} | Total: {snapshot?.students.length ?? 0}
         </p>
+
         <div className="space-y-3 md:hidden">
           {visibleStudents.map((student) => (
-            <article
-              key={student.id}
-              className={`rounded-brand border border-slate-800 bg-bg p-4 ${student.status === "inactive" ? "opacity-80" : ""}`}
-            >
+            <article key={student.id} className="rounded-brand border border-slate-800 bg-bg p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="font-semibold text-text">{student.fullName}</p>
@@ -380,7 +526,7 @@ export function StudentsPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => void handleToggleStatus(student)}
+                  onClick={() => void handleToggleStatus(student.id, student.status)}
                   disabled={!canWriteAcademyData || isPreviewMode}
                   className={`shrink-0 rounded-brand px-2 py-1 text-xs font-semibold transition disabled:opacity-40 ${
                     student.status === "active"
@@ -393,18 +539,16 @@ export function StudentsPage() {
               </div>
 
               <div className="mt-3 grid gap-2 text-sm text-muted">
-                <MobileInfo label="Contacto" value={student.phone || student.email || "-"} />
-                <MobileInfo
-                  label="Disciplinas"
-                  value={(student.disciplines ?? []).length > 0 ? (student.disciplines ?? []).map((discipline) => discipline.name).join(", ") : "Sin disciplinas"}
-                />
+                <MobileInfo label="Disciplinas" value={student.disciplines.map((discipline) => discipline.name).join(", ") || "Sin disciplinas"} />
+                <MobileInfo label="Estado de cuota" value={student.currentStatus} />
+                <MobileInfo label="Saldo pendiente" value={`$${student.pendingBalance}`} />
               </div>
 
               <div className="mt-4">
                 <button
                   type="button"
                   disabled={!canWriteAcademyData || isPreviewMode}
-                  onClick={() => onEdit(student)}
+                  onClick={() => onEdit(student.id)}
                   className="w-full rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
                 >
                   Editar
@@ -413,6 +557,7 @@ export function StudentsPage() {
             </article>
           ))}
         </div>
+
         <div className="hidden overflow-x-auto md:block">
           <table className="min-w-full text-sm">
             <thead className="text-left text-muted">
@@ -420,22 +565,29 @@ export function StudentsPage() {
                 <th className="px-3 py-2">Nombre</th>
                 <th className="px-3 py-2">Contacto</th>
                 <th className="px-3 py-2">Disciplinas</th>
+                <th className="px-3 py-2">Deuda</th>
                 <th className="px-3 py-2">Estado</th>
                 <th className="px-3 py-2">Accion</th>
               </tr>
             </thead>
             <tbody>
               {visibleStudents.map((student) => (
-                <tr key={student.id} className={`border-t border-slate-800 ${student.status === "inactive" ? "opacity-80" : ""}`}>
+                <tr key={student.id} className="border-t border-slate-800">
                   <td className="px-3 py-3">{student.fullName}</td>
                   <td className="px-3 py-3 text-muted">{student.email || student.phone || "-"}</td>
                   <td className="max-w-[260px] px-3 py-3 text-muted">
-                    {(student.disciplines ?? []).length > 0 ? (student.disciplines ?? []).map((discipline) => discipline.name).join(", ") : "Sin disciplinas"}
+                    {student.disciplines.map((discipline) => discipline.name).join(", ") || "Sin disciplinas"}
+                  </td>
+                  <td className="px-3 py-3">
+                    <p className={`font-semibold ${student.pendingBalance > 0 ? "text-danger" : "text-secondary"}`}>
+                      ${student.pendingBalance}
+                    </p>
+                    <p className="text-xs text-muted">{student.currentStatus}</p>
                   </td>
                   <td className="px-3 py-3">
                     <button
                       type="button"
-                      onClick={() => void handleToggleStatus(student)}
+                      onClick={() => void handleToggleStatus(student.id, student.status)}
                       disabled={!canWriteAcademyData || isPreviewMode}
                       className={`rounded-brand px-2 py-1 text-xs font-semibold transition disabled:opacity-40 ${
                         student.status === "active"
@@ -450,7 +602,7 @@ export function StudentsPage() {
                     <button
                       type="button"
                       disabled={!canWriteAcademyData || isPreviewMode}
-                      onClick={() => onEdit(student)}
+                      onClick={() => onEdit(student.id)}
                       className="rounded-brand border border-slate-600 px-2 py-1 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
                     >
                       Editar
@@ -460,7 +612,7 @@ export function StudentsPage() {
               ))}
               {visibleStudents.length === 0 && (
                 <tr>
-                  <td className="px-3 py-4 text-muted" colSpan={5}>
+                  <td className="px-3 py-4 text-muted" colSpan={6}>
                     No hay alumnos que coincidan con los filtros actuales.
                   </td>
                 </tr>
@@ -484,7 +636,7 @@ export function StudentsPage() {
                   {editingId ? "Editar alumno" : "Nuevo alumno"}
                 </h2>
                 <p className="mt-1 text-xs text-muted">
-                  Completa los datos sin perder de vista el listado principal.
+                  Al asignar una disciplina activa se genera la cuota inicial del periodo actual si todavia no existe.
                 </p>
               </div>
               <button
@@ -496,114 +648,82 @@ export function StudentsPage() {
               </button>
             </div>
 
-            <form onSubmit={(e) => void handleSave(e)} className="grid gap-4 text-sm">
+            <form onSubmit={(event) => void handleSave(event)} className="grid gap-4 text-sm">
               <SectionTitle title="Datos del alumno" />
               <div className="grid gap-3 md:grid-cols-2">
-                <Field
-                  label="Nombre completo"
-                  value={form.fullName}
-                  onChange={(value) => setForm((prev) => ({ ...prev, fullName: value }))}
-                />
-                <Field
-                  label="Email"
-                  type="email"
-                  value={form.email}
-                  onChange={(value) => setForm((prev) => ({ ...prev, email: value }))}
-                />
+                <Field label="Nombre completo" value={form.fullName} onChange={(value) => setForm((prev) => ({ ...prev, fullName: value }))} />
+                <Field label="Email" type="email" required={false} value={form.email} onChange={(value) => setForm((prev) => ({ ...prev, email: value }))} />
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
-                <Field
-                  label="Telefono del alumno"
-                  value={form.phone}
-                  onChange={(value) => setForm((prev) => ({ ...prev, phone: value }))}
-                  required={false}
-                />
-                {editingId && (
+                <Field label="Telefono principal" required={false} value={form.phone} onChange={(value) => setForm((prev) => ({ ...prev, phone: value }))} />
+                {editingId ? (
                   <div className="rounded-brand border border-slate-700 bg-bg px-3 py-2">
                     <p className="text-xs uppercase text-muted">Estado actual</p>
-                    <p className={`mt-1 text-sm font-semibold ${students.find((student) => student.id === editingId)?.status === "active" ? "text-secondary" : "text-danger"}`}>
-                      {formatMembershipStatus(students.find((student) => student.id === editingId)?.status ?? "active")}
+                    <p className="mt-1 text-sm font-semibold text-secondary">
+                      {formatMembershipStatus(snapshot?.students.find((student) => student.id === editingId)?.status ?? "active")}
                     </p>
+                  </div>
+                ) : (
+                  <div className="rounded-brand border border-slate-700 bg-bg px-3 py-2">
+                    <p className="text-xs uppercase text-muted">Alta operativa</p>
+                    <p className="mt-1 text-sm text-text">Carga un contacto basico y luego asigna disciplina.</p>
                   </div>
                 )}
               </div>
 
-              <SectionTitle title="Datos de urgencia" />
+              <SectionTitle title="Datos secundarios" />
               <div className="grid gap-3 md:grid-cols-2">
-                <Field
-                  label="Nombre del contacto"
-                  value={form.emergencyContactName}
-                  onChange={(value) => setForm((prev) => ({ ...prev, emergencyContactName: value }))}
-                  required={false}
-                />
-                <Field
-                  label="Telefono de contacto"
-                  value={form.contactPhone}
-                  onChange={(value) => setForm((prev) => ({ ...prev, contactPhone: value }))}
-                  required={false}
-                />
+                <Field label="Contacto de urgencia" required={false} value={form.emergencyContactName} onChange={(value) => setForm((prev) => ({ ...prev, emergencyContactName: value }))} />
+                <Field label="Telefono de urgencia" required={false} value={form.emergencyContactPhone} onChange={(value) => setForm((prev) => ({ ...prev, emergencyContactPhone: value }))} />
               </div>
 
               <TextArea
                 label="Alergias"
                 value={form.allergies}
                 onChange={(value) => setForm((prev) => ({ ...prev, allergies: value }))}
-                placeholder="Ej: alergia al mani, asma, requiere medicacion, etc."
+                placeholder="Ej: alergia al mani, asma, medicacion, etc."
               />
 
-              <SectionTitle title="Disciplinas" />
+              <SectionTitle title="Asignacion de disciplinas" />
               <div className="grid gap-2 rounded-brand border border-slate-700 bg-bg p-3">
-                {disciplines.filter((discipline) => discipline.active).length > 0 ? (
-                  disciplines
-                    .filter((discipline) => discipline.active)
-                    .map((discipline) => (
-                      <label key={discipline.id} className="flex items-center justify-between gap-3 text-sm text-muted">
-                        <span>
-                          {discipline.name} <span className="text-xs uppercase">({formatBillingType(discipline.billingType)})</span>
-                        </span>
-                        <span className="flex items-center gap-3">
-                          <span className="text-[11px] text-muted">
-                            {(discipline.paymentMode ?? (discipline.billingType === "monthly_fee" ? "monthly" : "one_time")) === "monthly"
-                              ? "Mensual"
-                              : discipline.allowPartial
-                                ? "Entrega parcial"
-                                : "Unico"}
-                          </span>
-                          <span className="text-primary">${discipline.price}</span>
-                          <input
-                            type="checkbox"
-                            checked={form.disciplineIds.includes(discipline.id)}
-                            onChange={(event) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                disciplineIds: event.target.checked
-                                  ? [...prev.disciplineIds, discipline.id]
-                                  : prev.disciplineIds.filter((id) => id !== discipline.id)
-                              }))
-                            }
-                          />
-                        </span>
-                      </label>
-                    ))
+                {disciplines.length > 0 ? (
+                  disciplines.map((discipline) => (
+                    <label key={discipline.id} className="flex items-center justify-between gap-3 text-sm text-muted">
+                      <span>
+                        {discipline.name}
+                        <span className="ml-2 text-xs uppercase text-primary">{discipline.modality || "Mensual"}</span>
+                      </span>
+                      <span className="flex items-center gap-3">
+                        <span className="text-[11px] text-muted">Vence dia {snapshot?.defaultBillingDay ?? 10}</span>
+                        <span className="text-primary">${discipline.baseAmount}</span>
+                        <input
+                          type="checkbox"
+                          checked={form.disciplineIds.includes(discipline.id)}
+                          onChange={(event) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              disciplineIds: event.target.checked
+                                ? [...prev.disciplineIds, discipline.id]
+                                : prev.disciplineIds.filter((id) => id !== discipline.id)
+                            }))
+                          }
+                        />
+                      </span>
+                    </label>
+                  ))
                 ) : (
-                  <p className="text-xs text-muted">Primero crea disciplinas en el modulo Disciplinas.</p>
+                  <p className="text-xs text-muted">Primero crea disciplinas activas en el modulo Disciplinas.</p>
                 )}
               </div>
 
               {error && <p className="text-xs text-danger">{error}</p>}
+
               <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="rounded-brand border border-slate-600 px-3 py-2 text-muted"
-                >
+                <button type="button" onClick={closeModal} className="rounded-brand border border-slate-600 px-3 py-2 text-muted">
                   Cancelar
                 </button>
-                <button
-                  disabled={!canWriteAcademyData || isPreviewMode}
-                  className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40"
-                >
+                <button disabled={!canWriteAcademyData || isPreviewMode} className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40">
                   {isPreviewMode ? "Modo demo" : editingId ? "Guardar cambios" : "Crear alumno"}
                 </button>
               </div>
@@ -651,7 +771,7 @@ function Field({
       <input
         type={type}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
         required={required}
       />
@@ -675,7 +795,7 @@ function TextArea({
       {label}
       <textarea
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         rows={3}
         placeholder={placeholder}
         className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
