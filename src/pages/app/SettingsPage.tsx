@@ -281,13 +281,13 @@ export function SettingsPage() {
 
         <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
           <div className="grid gap-4">
-            <section className="rounded-brand border border-primary/30 bg-gradient-to-br from-primary/15 via-bg to-secondary/10 p-5 shadow-soft">
+            <section className="rounded-brand border border-[rgba(0,209,255,0.18)] bg-gradient-to-br from-[rgba(0,209,255,0.10)] via-[#0B0F1A] to-[rgba(34,197,94,0.08)] p-5 shadow-soft">
               <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.24em] text-primary">Centro activo</p>
+                  <p className="text-xs uppercase tracking-[0.24em] text-primary">Estado actual del centro</p>
                   <h2 className="mt-2 font-display text-3xl text-text">{settings.name}</h2>
                   <p className="mt-2 max-w-2xl text-sm text-muted">
-                    Tu panel de cuenta muestra plan, capacidad actual y el estado general del centro en un solo lugar.
+                    Revisa tu plan, capacidad disponible y el estado de cuenta sin perder foco en la operacion.
                   </p>
                 </div>
                 <div className="rounded-brand border border-slate-700/80 bg-slate-950/40 px-4 py-3">
@@ -298,7 +298,7 @@ export function SettingsPage() {
               </div>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <InfoCard label="Capacidad" value={usage.limit === null ? "Ilimitada" : usage.usageLabel} accent="text-secondary" />
+                <InfoCard label="Capacidad usada" value={usage.limit === null ? "Ilimitada" : usage.usageLabel} accent="text-secondary" />
                 <InfoCard label="Plan activo" value={getPlanLabel(platformConfig, settings.plan)} accent="text-primary" />
                 <InfoCard label="Abono mensual" value={`$${currentPlanPrice}`} accent="text-secondary" />
               </div>
@@ -313,7 +313,7 @@ export function SettingsPage() {
                     <p className="mt-1 text-sm text-muted">
                       {usage.limit === null
                         ? "Tu plan no tiene limite de alumnos configurado."
-                        : "Esto te ayuda a entender cuanto margen real te queda para crecer."}
+                        : "Entiende de inmediato cuanto margen real te queda para sumar alumnos."}
                     </p>
                   </div>
                   {usage.limit !== null && (
@@ -335,7 +335,7 @@ export function SettingsPage() {
                     </div>
                     <p className="mt-2 text-xs text-muted">
                       {usage.limit - studentsCount > 0
-                        ? `Todavia puedes sumar ${usage.limit - studentsCount} alumnos antes de llegar al limite.`
+                        ? `Te quedan ${usage.limit - studentsCount} lugares disponibles.`
                         : "Estas en el limite actual del plan."}
                     </p>
                   </div>
@@ -347,24 +347,24 @@ export function SettingsPage() {
               </div>
 
               <div className="rounded-brand border border-slate-700 bg-bg p-4">
-                <p className="text-xs uppercase tracking-wide text-muted">Estado de cuenta</p>
+                <p className="text-xs uppercase tracking-wide text-muted">Estado del centro</p>
                 <div className="mt-3 grid gap-3">
                   <SignalCard
                     title="Plan contratado"
                     detail={getPlanDescription(platformConfig, settings.plan)}
                     accent="text-primary"
                   />
-                  <SignalCard
-                    title="Diferencial"
-                    detail={getPlanHighlight(platformConfig, settings.plan)}
-                    accent="text-secondary"
-                  />
+                    <SignalCard
+                      title="Diferencial"
+                      detail={getPlanHighlight(platformConfig, settings.plan)}
+                      accent="text-secondary"
+                    />
                   {trialSummary ? (
                     <SignalCard title={trialSummary.title} detail={trialSummary.detail} accent={trialSummary.accent} />
                   ) : (
                     <SignalCard
                       title="Centro listo para operar"
-                      detail="La configuracion principal del centro ya esta activa y disponible para el trabajo diario."
+                      detail="Tu cuenta esta lista para cobrar, organizar alumnos y seguir el estado del plan."
                       accent="text-secondary"
                     />
                   )}
@@ -375,6 +375,7 @@ export function SettingsPage() {
 
           <aside className="rounded-brand border border-slate-700 bg-bg p-4">
             <p className="text-xs uppercase tracking-wide text-muted">Planes disponibles</p>
+            <p className="mt-2 text-sm text-muted">Comparalos rapido sin quitar protagonismo al estado actual del centro.</p>
 
             <div className="mt-4 grid gap-3">
               {(["basic", "pro", "premium"] as const).map((plan) => {

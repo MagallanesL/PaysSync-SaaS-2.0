@@ -55,6 +55,30 @@ async function loadUserProfile(uid: string): Promise<UserProfile | null> {
   };
 }
 
+async function ensureUserProfile(user: User): Promise<UserProfile> {
+  const fallbackProfile: UserProfile = {
+    email: user.email ?? "",
+    displayName: user.displayName ?? "",
+    platformRole: "user",
+    active: true
+  };
+
+  await setDoc(
+    doc(db, "users", user.uid),
+    {
+      email: fallbackProfile.email,
+      displayName: fallbackProfile.displayName,
+      platformRole: "user",
+      active: true,
+      updatedAt: serverTimestamp(),
+      createdAt: serverTimestamp()
+    },
+    { merge: true }
+  );
+
+  return fallbackProfile;
+}
+
 async function loadPlatformConfigCached() {
   if (!platformConfigCachePromise) {
     platformConfigCachePromise = getDoc(doc(db, "platform", "config")).then((configSnap) =>
@@ -63,6 +87,15 @@ async function loadPlatformConfigCached() {
   }
 
   return platformConfigCachePromise;
+}
+
+async function safeGetDocs<T>(promise: Promise<T>) {
+  try {
+    return await promise;
+  } catch (error) {
+    console.warn("PaySync auth lookup fallback", error);
+    return null;
+  }
 }
 
 function isMembershipActive(status: unknown) {
@@ -84,16 +117,11 @@ async function loadActiveMembership(uid: string, email?: string): Promise<Academ
     ? query(collectionGroup(db, "users"), where("mail", "==", normalizedEmail), limit(20))
     : null;
 
-  const [platformConfig, ownerByUidSnap, ownerByEmailSnap, byUserIdSnap, byEmailSnap, byMailSnap] = await Promise.all([
-    loadPlatformConfigCached(),
-    getDocs(ownerByUidQuery),
-    ownerByEmailQuery ? getDocs(ownerByEmailQuery) : Promise.resolve(null),
-    getDocs(byUserIdQuery),
-    byEmailQuery ? getDocs(byEmailQuery) : Promise.resolve(null),
-    byMailQuery ? getDocs(byMailQuery) : Promise.resolve(null)
-  ]);
+  const platformConfig = await loadPlatformConfigCached();
+  const ownerByUidSnap = await safeGetDocs(getDocs(ownerByUidQuery));
+  const ownerByEmailSnap = ownerByEmailQuery ? await safeGetDocs(getDocs(ownerByEmailQuery)) : null;
 
-  let ownerAcademyDoc = ownerByUidSnap.docs.find((docSnap) => docSnap.data().status !== "suspended");
+  let ownerAcademyDoc = ownerByUidSnap?.docs.find((docSnap) => docSnap.data().status !== "suspended");
 
   if (!ownerAcademyDoc && ownerByEmailSnap) {
     ownerAcademyDoc = ownerByEmailSnap.docs.find((docSnap) => docSnap.data().status !== "suspended");
@@ -143,7 +171,11 @@ async function loadActiveMembership(uid: string, email?: string): Promise<Academ
     };
   }
 
-  let membershipDoc = byUserIdSnap.docs.find((docSnap) => isMembershipActive(docSnap.data().status));
+  const byUserIdSnap = await safeGetDocs(getDocs(byUserIdQuery));
+  const byEmailSnap = byEmailQuery ? await safeGetDocs(getDocs(byEmailQuery)) : null;
+  const byMailSnap = byMailQuery ? await safeGetDocs(getDocs(byMailQuery)) : null;
+
+  let membershipDoc = byUserIdSnap?.docs.find((docSnap) => isMembershipActive(docSnap.data().status));
 
   if (!membershipDoc && byEmailSnap) {
     membershipDoc = byEmailSnap.docs.find((docSnap) => isMembershipActive(docSnap.data().status));
@@ -210,11 +242,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         const loadedProfile = await loadUserProfile(user.uid);
-        setProfile(loadedProfile);
+        const effectiveProfile = loadedProfile ?? (await ensureUserProfile(user));
+        setProfile(effectiveProfile);
 
-        if (!loadedProfile) {
-          setMembership(null);
-        } else if (loadedProfile.platformRole === "root") {
+        if (effectiveProfile.platformRole === "root") {
           setMembership(null);
         } else {
           const activeMembership = await loadActiveMembership(user.uid, user.email ?? undefined);

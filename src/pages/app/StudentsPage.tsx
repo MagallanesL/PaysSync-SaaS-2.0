@@ -76,6 +76,8 @@ function sortStudents(items: Student[]) {
 export function StudentsPage() {
   const { membership, canWriteAcademyData, isPreviewMode } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | Student["status"]>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<StudentFormState>(emptyForm);
   const [plan, setPlan] = useState<AcademyPlan>("basic");
@@ -303,6 +305,17 @@ export function StudentsPage() {
   }
 
   const activeStudents = students.filter((student) => student.status === "active").length;
+  const visibleStudents = students.filter((student) => {
+    const matchesStatus = statusFilter === "all" || student.status === statusFilter;
+    const disciplinesLabel = (student.disciplines ?? []).map((discipline) => discipline.name).join(" ").toLowerCase();
+    const matchesSearch =
+      !search.trim() ||
+      student.fullName.toLowerCase().includes(search.toLowerCase()) ||
+      student.email.toLowerCase().includes(search.toLowerCase()) ||
+      student.phone.toLowerCase().includes(search.toLowerCase()) ||
+      disciplinesLabel.includes(search.toLowerCase());
+    return matchesStatus && matchesSearch;
+  });
 
   return (
     <>
@@ -319,11 +332,43 @@ export function StudentsPage() {
           </button>
         }
       >
+        <div className="mb-4 grid gap-3 rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#0B0F1A] p-4 xl:grid-cols-[1.2fr_0.8fr]">
+          <div>
+            <p className="text-xs uppercase tracking-[0.24em] text-[#9FB0D0]">Base de alumnos</p>
+            <p className="mt-2 text-sm text-[#9FB0D0]">
+              Busca rapido, filtra por estado y deja los datos secundarios para el detalle de edicion.
+            </p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
+            <label className="grid gap-1 text-sm text-[#9FB0D0]">
+              Buscar
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Nombre, email, telefono o disciplina"
+                className="min-w-0 rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#121A2B] px-3 py-2 text-[#F5F7FB] outline-none focus:border-[#00D1FF]"
+              />
+            </label>
+            <label className="grid gap-1 text-sm text-[#9FB0D0]">
+              Estado
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as "all" | Student["status"])}
+                className="w-full rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#121A2B] px-3 py-2 text-[#F5F7FB] outline-none focus:border-[#00D1FF]"
+              >
+                <option value="all">Todos</option>
+                <option value="active">Activos</option>
+                <option value="inactive">Inactivos</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
         <p className="mb-3 text-xs text-muted">
           Plan actual: <span className="uppercase text-primary">{getPlanLabel(platformConfig, plan)}</span> | Limite: {maxStudents ?? "Ilimitado"} | Activos: {activeStudents} | Total: {students.length}
         </p>
         <div className="space-y-3 md:hidden">
-          {students.map((student) => (
+          {visibleStudents.map((student) => (
             <article
               key={student.id}
               className={`rounded-brand border border-slate-800 bg-bg p-4 ${student.status === "inactive" ? "opacity-80" : ""}`}
@@ -331,7 +376,7 @@ export function StudentsPage() {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="font-semibold text-text">{student.fullName}</p>
-                  <p className="break-all text-sm text-muted">{student.email}</p>
+                  <p className="break-all text-sm text-muted">{student.email || student.phone || "Sin contacto principal"}</p>
                 </div>
                 <button
                   type="button"
@@ -348,10 +393,11 @@ export function StudentsPage() {
               </div>
 
               <div className="mt-3 grid gap-2 text-sm text-muted">
-                <MobileInfo label="Telefono" value={student.phone || "-"} />
-                <MobileInfo label="Contacto" value={student.emergencyContactName || "-"} />
-                <MobileInfo label="Telefono urgencia" value={student.contactPhone || "-"} />
-                <MobileInfo label="Alergias" value={student.allergies || "-"} />
+                <MobileInfo label="Contacto" value={student.phone || student.email || "-"} />
+                <MobileInfo
+                  label="Disciplinas"
+                  value={(student.disciplines ?? []).length > 0 ? (student.disciplines ?? []).map((discipline) => discipline.name).join(", ") : "Sin disciplinas"}
+                />
               </div>
 
               <div className="mt-4">
@@ -372,24 +418,20 @@ export function StudentsPage() {
             <thead className="text-left text-muted">
               <tr>
                 <th className="px-3 py-2">Nombre</th>
-                <th className="px-3 py-2">Correo</th>
-                <th className="px-3 py-2">Telefono</th>
                 <th className="px-3 py-2">Contacto</th>
-                <th className="px-3 py-2">Telefono urgencia</th>
-                <th className="px-3 py-2">Alergias</th>
+                <th className="px-3 py-2">Disciplinas</th>
                 <th className="px-3 py-2">Estado</th>
                 <th className="px-3 py-2">Accion</th>
               </tr>
             </thead>
             <tbody>
-              {students.map((student) => (
+              {visibleStudents.map((student) => (
                 <tr key={student.id} className={`border-t border-slate-800 ${student.status === "inactive" ? "opacity-80" : ""}`}>
                   <td className="px-3 py-3">{student.fullName}</td>
-                  <td className="px-3 py-3 text-muted">{student.email}</td>
-                  <td className="px-3 py-3 text-muted">{student.phone || "-"}</td>
-                  <td className="px-3 py-3 text-muted">{student.emergencyContactName || "-"}</td>
-                  <td className="px-3 py-3 text-muted">{student.contactPhone || "-"}</td>
-                  <td className="max-w-[220px] px-3 py-3 text-muted">{student.allergies || "-"}</td>
+                  <td className="px-3 py-3 text-muted">{student.email || student.phone || "-"}</td>
+                  <td className="max-w-[260px] px-3 py-3 text-muted">
+                    {(student.disciplines ?? []).length > 0 ? (student.disciplines ?? []).map((discipline) => discipline.name).join(", ") : "Sin disciplinas"}
+                  </td>
                   <td className="px-3 py-3">
                     <button
                       type="button"
@@ -416,6 +458,13 @@ export function StudentsPage() {
                   </td>
                 </tr>
               ))}
+              {visibleStudents.length === 0 && (
+                <tr>
+                  <td className="px-3 py-4 text-muted" colSpan={5}>
+                    No hay alumnos que coincidan con los filtros actuales.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

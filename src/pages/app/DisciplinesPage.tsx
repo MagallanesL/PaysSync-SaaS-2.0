@@ -207,6 +207,12 @@ export function DisciplinesPage() {
           </button>
         }
       >
+        <div className="mb-4 grid gap-3 rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#0B0F1A] p-4 lg:grid-cols-3">
+          <InfoCard label="Activas" value={String(disciplines.filter((discipline) => discipline.active).length)} accent="text-[#22C55E]" />
+          <InfoCard label="Valor base promedio" value={`$${Math.round(disciplines.reduce((sum, discipline) => sum + discipline.price, 0) / Math.max(disciplines.length, 1))}`} accent="text-[#00D1FF]" />
+          <InfoCard label="Modo principal" value="Mensual u ocasional" accent="text-[#F5F7FB]" />
+        </div>
+
         <div className="space-y-3 md:hidden">
           {disciplines.map((discipline) => (
             <article
@@ -234,11 +240,11 @@ export function DisciplinesPage() {
 
               <div className="mt-3 grid gap-2 text-sm text-muted">
                 <MobileInfo
-                  label="Modalidad"
+                  label="Modo de cobro"
                   value={paymentModeLabels[discipline.paymentMode ?? (discipline.billingType === "monthly_fee" ? "monthly" : "one_time")]}
                 />
                 <MobileInfo label="Valor base" value={`$${discipline.price}`} />
-                <MobileInfo label="Pagos" value={discipline.allowPartial ? "Permite entregas" : "Pago completo"} />
+                <MobileInfo label="Cobro" value={discipline.allowPartial ? "Permite entregas" : "Cobro completo"} />
               </div>
 
               <div className="mt-4">
@@ -260,10 +266,10 @@ export function DisciplinesPage() {
             <thead className="text-left text-muted">
               <tr>
                 <th className="px-3 py-2">Nombre</th>
-                <th className="px-3 py-2">Categoria</th>
-                <th className="px-3 py-2">Modalidad</th>
+                <th className="px-3 py-2">Tipo</th>
+                <th className="px-3 py-2">Modo de cobro</th>
                 <th className="px-3 py-2">Valor base</th>
-                <th className="px-3 py-2">Pagos</th>
+                <th className="px-3 py-2">Cobro</th>
                 <th className="px-3 py-2">Estado</th>
                 <th className="px-3 py-2">Accion</th>
               </tr>
@@ -276,8 +282,8 @@ export function DisciplinesPage() {
                   <td className="px-3 py-3 text-muted">
                     {paymentModeLabels[discipline.paymentMode ?? (discipline.billingType === "monthly_fee" ? "monthly" : "one_time")]}
                   </td>
-                  <td className="px-3 py-3 text-primary">${discipline.price}</td>
-                  <td className="px-3 py-3 text-muted">{discipline.allowPartial ? "Permite entregas" : "Pago completo"}</td>
+                  <td className="px-3 py-3 text-primary font-semibold">${discipline.price}</td>
+                  <td className="px-3 py-3 text-muted">{discipline.allowPartial ? "Permite entregas" : "Cobro completo"}</td>
                   <td className="px-3 py-3">
                     <button
                       type="button"
@@ -432,6 +438,15 @@ function MobileInfo({ label, value }: { label: string; value: string }) {
     <div className="grid gap-1">
       <p className="text-[11px] uppercase tracking-wide text-muted">{label}</p>
       <p className="break-words text-text">{value}</p>
+    </div>
+  );
+}
+
+function InfoCard({ label, value, accent }: { label: string; value: string; accent: string }) {
+  return (
+    <div className="rounded-brand border border-[rgba(0,209,255,0.12)] bg-[#121A2B] p-3">
+      <p className="text-[11px] uppercase tracking-wide text-[#9FB0D0]">{label}</p>
+      <p className={`mt-2 text-lg font-semibold ${accent}`}>{value}</p>
     </div>
   );
 }

@@ -37,8 +37,8 @@ export function MarketingLandingPage() {
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,rgba(0,200,150,0.12),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.05),transparent_22%)]" />
 
       {authModalMode && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/82 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-6xl">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/82 p-3 backdrop-blur-sm sm:flex sm:items-center sm:justify-center sm:p-4">
+          <div className="mx-auto w-full max-w-6xl py-2 sm:py-0">
             <AuthEntryPanel initialMode={authModalMode} embedded onRequestClose={() => setAuthModalMode(null)} />
           </div>
         </div>

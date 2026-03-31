@@ -557,18 +557,18 @@ export function FeesPage() {
   return (
     <>
       <Panel title="Cuotas">
-        <div className="mb-4 rounded-brand border border-primary/30 bg-primary/10 p-4 text-sm">
-          <p className="font-semibold text-text">Las cuotas se generan desde las disciplinas asignadas a cada alumno.</p>
+        <div className="mb-4 rounded-brand border border-[rgba(0,209,255,0.15)] bg-[rgba(0,209,255,0.06)] p-4 text-sm">
+          <p className="font-semibold text-text">La vista de cuotas te muestra primero lo que requiere accion.</p>
           <p className="mt-1 text-muted">
             Aqui gestionas total, entregado, saldo, vencimiento y seguimiento. El estado se actualiza solo segun lo que falta cobrar.
           </p>
         </div>
 
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
-          <Summary label="Vencidas" value={stats.overdue} color="text-danger" />
-          <Summary label="Por vencer" value={stats.upcoming} color="text-warning" />
-          <Summary label="Parciales" value={stats.partial} color="text-primary" />
-          <Summary label="Saldo pendiente" value={`$${stats.pendingBalance}`} color="text-danger" />
+          <Summary label="Saldo pendiente" value={`$${stats.pendingBalance}`} color="text-[#FF4D4F]" helper="Dinero por cobrar" featured />
+          <Summary label="Vencidas" value={stats.overdue} color="text-[#FF4D4F]" helper="Requieren seguimiento" />
+          <Summary label="Por vencer" value={stats.upcoming} color="text-[#F59E0B]" helper="Proximo vencimiento" />
+          <Summary label="Parciales" value={stats.partial} color="text-[#00D1FF]" helper="Cobros incompletos" />
         </div>
 
         <div className="mb-3 flex flex-wrap gap-3 text-xs text-muted">
@@ -590,7 +590,7 @@ export function FeesPage() {
 
               <div className="mt-3 grid gap-2 text-sm text-muted">
                 <MobileInfo
-                  label="Modalidad"
+                  label="Modo de cobro"
                   value={
                     fee.paymentMode === "monthly"
                       ? "Mensual"
@@ -599,7 +599,7 @@ export function FeesPage() {
                         : "Cargo unico"
                   }
                 />
-                <MobileInfo label="Periodo" value={fee.period ? formatPeriodLabel(fee.period) : fee.concept} />
+                <MobileInfo label="Concepto" value={fee.period ? formatPeriodLabel(fee.period) : fee.concept} />
                 <MobileInfo label="Vencimiento" value={fee.dueDate} />
               </div>
 
@@ -625,8 +625,8 @@ export function FeesPage() {
                     <WhatsAppIcon />
                     Avisar por WhatsApp
                   </a>
-                ) : (
-                  <p className="text-sm text-muted">Sin aviso disponible</p>
+                  ) : (
+                  <p className="text-sm text-muted">Aviso pendiente</p>
                 )}
                 <button
                   type="button"
@@ -647,12 +647,9 @@ export function FeesPage() {
           <table className="min-w-full text-sm">
             <thead className="text-left text-muted">
               <tr>
-                <th className="px-3 py-2">Prioridad</th>
                 <th className="px-3 py-2">Alumno</th>
                 <th className="px-3 py-2">Concepto</th>
-                <th className="px-3 py-2">Modalidad</th>
                 <th className="px-3 py-2">Total</th>
-                <th className="px-3 py-2">Entregado</th>
                 <th className="px-3 py-2">Saldo</th>
                 <th className="px-3 py-2">Vencimiento</th>
                 <th className="px-3 py-2">Estado</th>
@@ -664,29 +661,21 @@ export function FeesPage() {
               {trackingRows.map((fee) => {
                 return (
                   <tr key={fee.id} className="border-t border-slate-800">
-                    <td className="px-3 py-3">
-                      <PriorityBadge daysLeft={fee.daysLeft} />
-                    </td>
                     <td className="px-3 py-3 text-muted">{fee.studentName}</td>
                     <td className="px-3 py-3">
                       <p className="font-medium text-text">{fee.disciplineName ?? fee.observation ?? fee.concept}</p>
                       <p className="text-xs text-muted">
-                        {fee.period ? `Periodo ${formatPeriodLabel(fee.period)}` : fee.concept}
+                        {fee.period ? `Periodo ${formatPeriodLabel(fee.period)}` : fee.paymentMode === "monthly" ? "Mensual" : "Cobro ocasional"}
                       </p>
                     </td>
-                    <td className="px-3 py-3 text-muted">
-                      {fee.paymentMode === "monthly"
-                        ? "Mensual"
-                        : fee.partialAllowed
-                          ? "Entrega parcial"
-                          : "Cargo unico"}
-                    </td>
                     <td className="px-3 py-3 font-semibold text-primary">${fee.amount}</td>
-                    <td className="px-3 py-3 text-secondary">${fee.paidAmount}</td>
                     <td className="px-3 py-3 font-semibold text-warning">${fee.balance}</td>
                     <td className="px-3 py-3 text-muted">{fee.dueDate}</td>
                     <td className="px-3 py-3">
-                      <StatusBadge status={fee.status} />
+                      <div className="flex flex-col gap-2">
+                        <PriorityBadge daysLeft={fee.daysLeft} />
+                        <StatusBadge status={fee.status} />
+                      </div>
                     </td>
                     <td className="px-3 py-3">
                       {fee.whatsappUrl ? (
@@ -700,7 +689,7 @@ export function FeesPage() {
                           <WhatsAppIcon />
                         </a>
                       ) : (
-                        <span className="text-xs text-muted">Sin aviso</span>
+                        <span className="text-xs text-muted">Aviso pendiente</span>
                       )}
                     </td>
                     <td className="px-3 py-3">
@@ -718,7 +707,7 @@ export function FeesPage() {
               })}
               {trackingRows.length === 0 && (
                 <tr>
-                  <td className="px-3 py-3 text-muted" colSpan={11}>
+                  <td className="px-3 py-3 text-muted" colSpan={8}>
                     No hay cuotas para seguir dentro de los proximos 15 dias.
                   </td>
                 </tr>
@@ -820,11 +809,24 @@ function MobileInfo({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Summary({ label, value, color }: { label: string; value: number | string; color: string }) {
+function Summary({
+  label,
+  value,
+  color,
+  helper,
+  featured = false
+}: {
+  label: string;
+  value: number | string;
+  color: string;
+  helper?: string;
+  featured?: boolean;
+}) {
   return (
-    <div className="rounded-brand border border-slate-700 bg-bg p-3">
+    <div className={`rounded-brand border p-3 ${featured ? "border-[rgba(255,77,79,0.28)] bg-[rgba(255,77,79,0.06)]" : "border-slate-700 bg-bg"}`}>
       <p className="text-xs uppercase text-muted">{label}</p>
       <p className={`mt-1 font-display text-xl ${color}`}>{value}</p>
+      {helper ? <p className="mt-2 text-xs text-muted">{helper}</p> : null}
     </div>
   );
 }
