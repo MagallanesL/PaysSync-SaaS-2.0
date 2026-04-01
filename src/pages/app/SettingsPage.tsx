@@ -441,6 +441,7 @@ export function SettingsPage() {
               </p>
               {billingDayStatus ? <p className="mt-2 text-xs text-secondary">{billingDayStatus}</p> : null}
             </section>
+
           </div>
 
           <aside className="rounded-brand border border-slate-700 bg-bg p-4">

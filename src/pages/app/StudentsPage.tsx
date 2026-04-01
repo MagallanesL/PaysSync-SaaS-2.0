@@ -7,6 +7,8 @@ import {
   writeBatch
 } from "firebase/firestore";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { StudentFormModal, type StudentFormState } from "../../components/app/students/StudentFormModal";
+import { StudentsList } from "../../components/app/students/StudentsList";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
 import {
@@ -18,7 +20,6 @@ import {
   type DisciplineRecord,
   type EnrollmentRecord
 } from "../../lib/academyBilling";
-import { formatMembershipStatus } from "../../lib/display";
 import { db } from "../../lib/firebase";
 import {
   DEFAULT_PLATFORM_CONFIG,
@@ -28,16 +29,6 @@ import {
   type PlatformConfig
 } from "../../lib/plans";
 import type { AcademyPlan } from "../../lib/types";
-
-interface StudentFormState {
-  fullName: string;
-  email: string;
-  phone: string;
-  emergencyContactName: string;
-  emergencyContactPhone: string;
-  allergies: string;
-  disciplineIds: string[];
-}
 
 const emptyForm: StudentFormState = {
   fullName: "",
@@ -530,321 +521,31 @@ export function StudentsPage() {
           </div>
         ) : null}
 
-        <div className="space-y-3 md:hidden">
-          {visibleStudents.map((student) => (
-            <article key={student.id} className="rounded-brand border border-slate-800 bg-bg p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-semibold text-text">{student.fullName}</p>
-                  <p className="break-all text-sm text-muted">{student.email || student.phone || "Sin contacto principal"}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handleToggleStatus(student.id, student.status)}
-                  disabled={!canWriteAcademyData || isPreviewMode}
-                  className={`shrink-0 rounded-brand px-2 py-1 text-xs font-semibold transition disabled:opacity-40 ${
-                    student.status === "active"
-                      ? "bg-secondary/15 text-secondary hover:bg-secondary/25"
-                      : "bg-danger/15 text-danger hover:bg-danger/25"
-                  }`}
-                >
-                  {formatMembershipStatus(student.status)}
-                </button>
-              </div>
-
-              <div className="mt-3 grid gap-2 text-sm text-muted">
-                <MobileInfo label="Disciplinas" value={student.disciplines.map((discipline) => discipline.name).join(", ") || "Sin disciplinas"} />
-                <MobileInfo label="Estado de cuota" value={student.currentStatus} />
-                <MobileInfo label="Saldo pendiente" value={`$${student.pendingBalance}`} />
-              </div>
-
-              <div className="mt-4">
-                <button
-                  type="button"
-                  disabled={!canWriteAcademyData || isPreviewMode}
-                  onClick={() => onEdit(student.id)}
-                  className="w-full rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
-                >
-                  Editar
-                </button>
-              </div>
-            </article>
-          ))}
-        </div>
-
-        <div className="hidden overflow-x-auto md:block">
-          <table className="min-w-full text-sm">
-            <thead className="text-left text-muted">
-              <tr>
-                <th className="px-3 py-2">Nombre</th>
-                <th className="px-3 py-2">Contacto</th>
-                <th className="px-3 py-2">Disciplinas</th>
-                <th className="px-3 py-2">Deuda</th>
-                <th className="px-3 py-2">Estado</th>
-                <th className="px-3 py-2">Accion</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleStudents.map((student) => (
-                <tr key={student.id} className="border-t border-slate-800">
-                  <td className="px-3 py-3">{student.fullName}</td>
-                  <td className="px-3 py-3 text-muted">{student.email || student.phone || "-"}</td>
-                  <td className="max-w-[260px] px-3 py-3 text-muted">
-                    {student.disciplines.map((discipline) => discipline.name).join(", ") || "Sin disciplinas"}
-                  </td>
-                  <td className="px-3 py-3">
-                    <p className={`font-semibold ${student.pendingBalance > 0 ? "text-danger" : "text-secondary"}`}>
-                      ${student.pendingBalance}
-                    </p>
-                    <p className="text-xs text-muted">{student.currentStatus}</p>
-                  </td>
-                  <td className="px-3 py-3">
-                    <button
-                      type="button"
-                      onClick={() => void handleToggleStatus(student.id, student.status)}
-                      disabled={!canWriteAcademyData || isPreviewMode}
-                      className={`rounded-brand px-2 py-1 text-xs font-semibold transition disabled:opacity-40 ${
-                        student.status === "active"
-                          ? "bg-secondary/15 text-secondary hover:bg-secondary/25"
-                          : "bg-danger/15 text-danger hover:bg-danger/25"
-                      }`}
-                    >
-                      {formatMembershipStatus(student.status)}
-                    </button>
-                  </td>
-                  <td className="px-3 py-3">
-                    <button
-                      type="button"
-                      disabled={!canWriteAcademyData || isPreviewMode}
-                      onClick={() => onEdit(student.id)}
-                      className="rounded-brand border border-slate-600 px-2 py-1 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
-                    >
-                      Editar
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {visibleStudents.length === 0 && (
-                <tr>
-                  <td className="px-3 py-4 text-muted" colSpan={6}>
-                    No hay alumnos que coincidan con los filtros actuales.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <StudentsList
+          students={visibleStudents}
+          canWrite={canWriteAcademyData}
+          isPreviewMode={isPreviewMode}
+          onEdit={onEdit}
+          onToggleStatus={(studentId, status) => void handleToggleStatus(studentId, status)}
+        />
       </Panel>
 
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="student-modal-title"
-            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-brand border border-slate-700/80 bg-surface p-4 shadow-soft"
-          >
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <h2 id="student-modal-title" className="font-display text-lg text-text">
-                  {editingId ? "Editar alumno y asignacion de cuota" : "Nuevo alumno y asignacion de cuota"}
-                </h2>
-                <p className="mt-1 text-xs text-muted">
-                  Deja lista el alta operativa para cobrar desde este mismo paso.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeModal}
-                className="rounded-brand border border-slate-600 px-2 py-1 text-xs text-muted hover:border-primary hover:text-primary"
-              >
-                Cerrar
-              </button>
-            </div>
-
-            <form onSubmit={(event) => void handleSave(event)} className="grid gap-4 text-sm">
-              <SectionTitle title="Asignacion de disciplina" />
-              <div className="rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#0B0F1A] p-3">
-                <p className="text-xs uppercase tracking-wide text-primary">Alta con impacto inmediato</p>
-                <p className="mt-2 text-sm text-muted">Se generara automaticamente la cuota del mes actual.</p>
-              </div>
-              <div className="grid gap-2 rounded-brand border border-slate-700 bg-bg p-3">
-                {disciplines.length > 0 ? (
-                  disciplines.map((discipline) => (
-                    <label key={discipline.id} className="rounded-brand border border-slate-800 bg-[#0B0F1A] p-3 text-sm text-muted transition hover:border-primary/40">
-                      <span className="flex items-start justify-between gap-3">
-                        <span className="min-w-0">
-                          <span className="block font-medium text-text">{discipline.name}</span>
-                          <span className="mt-1 block text-xs uppercase text-primary">
-                            {discipline.modality || "Mensual"}
-                          </span>
-                          <span className="mt-2 block text-xs text-muted">
-                            Monto mensual: <span className="text-text">${discipline.baseAmount}</span>
-                          </span>
-                          <span className="mt-1 block text-xs text-muted">
-                            Dia de vencimiento: <span className="text-text">{snapshot?.defaultBillingDay ?? 10}</span>
-                          </span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={form.disciplineIds.includes(discipline.id)}
-                          onChange={(event) =>
-                            setForm((prev) => ({
-                              ...prev,
-                              disciplineIds: event.target.checked
-                                ? [...prev.disciplineIds, discipline.id]
-                                : prev.disciplineIds.filter((id) => id !== discipline.id)
-                            }))
-                          }
-                          className="mt-1"
-                        />
-                      </span>
-                    </label>
-                  ))
-                ) : (
-                  <p className="text-xs text-muted">Primero crea disciplinas activas en el modulo Disciplinas.</p>
-                )}
-              </div>
-              {disciplines.length > 0 && form.disciplineIds.length === 0 ? (
-                <div className="rounded-brand border border-warning/30 bg-warning/10 px-3 py-3 text-xs text-warning">
-                  Selecciona al menos una disciplina para generar la cuota inicial.
-                </div>
-              ) : null}
-
-              <SectionTitle title="Datos basicos del alumno" />
-              <p className="-mt-2 text-xs text-muted">Podes completar mas datos despues.</p>
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Nombre completo" value={form.fullName} onChange={(value) => setForm((prev) => ({ ...prev, fullName: value }))} />
-                <Field label="Email" type="email" required={false} value={form.email} onChange={(value) => setForm((prev) => ({ ...prev, email: value }))} />
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Telefono principal" required={false} value={form.phone} onChange={(value) => setForm((prev) => ({ ...prev, phone: value }))} />
-                {editingId ? (
-                  <div className="rounded-brand border border-slate-700 bg-bg px-3 py-2">
-                    <p className="text-xs uppercase text-muted">Estado actual</p>
-                    <p className="mt-1 text-sm font-semibold text-secondary">
-                      {formatMembershipStatus(snapshot?.students.find((student) => student.id === editingId)?.status ?? "active")}
-                    </p>
-                  </div>
-                ) : (
-                  <div className="rounded-brand border border-slate-700 bg-bg px-3 py-2">
-                    <p className="text-xs uppercase text-muted">Alta operativa</p>
-                    <p className="mt-1 text-sm text-text">Carga un contacto basico y luego asigna disciplina.</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-brand border border-slate-700 bg-bg">
-                <button
-                  type="button"
-                  onClick={() => setShowAdditionalData((prev) => !prev)}
-                  className="flex w-full items-center justify-between px-3 py-3 text-left text-sm text-text"
-                >
-                  <span>Agregar datos adicionales</span>
-                  <span className="text-xs text-primary">{showAdditionalData ? "Ocultar" : "Mostrar"}</span>
-                </button>
-                {showAdditionalData ? (
-                  <div className="grid gap-4 border-t border-slate-700 px-3 py-3">
-                    <SectionTitle title="Datos secundarios" />
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <Field label="Contacto de urgencia" required={false} value={form.emergencyContactName} onChange={(value) => setForm((prev) => ({ ...prev, emergencyContactName: value }))} />
-                      <Field label="Telefono de urgencia" required={false} value={form.emergencyContactPhone} onChange={(value) => setForm((prev) => ({ ...prev, emergencyContactPhone: value }))} />
-                    </div>
-
-                    <TextArea
-                      label="Alergias"
-                      value={form.allergies}
-                      onChange={(value) => setForm((prev) => ({ ...prev, allergies: value }))}
-                      placeholder="Ej: alergia al mani, asma, medicacion, etc."
-                    />
-                  </div>
-                ) : null}
-              </div>
-
-              {error && <p className="text-xs text-danger">{error}</p>}
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={closeModal} className="rounded-brand border border-slate-600 px-3 py-2 text-muted">
-                  Cancelar
-                </button>
-                <button disabled={!canWriteAcademyData || isPreviewMode} className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40">
-                  {isPreviewMode ? "Modo demo" : editingId ? "Guardar cambios" : "Crear alumno y generar cuota"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <StudentFormModal
+        isOpen={isModalOpen}
+        editingId={editingId}
+        form={form}
+        disciplines={disciplines}
+        defaultBillingDay={snapshot?.defaultBillingDay ?? 10}
+        currentStudentStatus={snapshot?.students.find((student) => student.id === editingId)?.status}
+        showAdditionalData={showAdditionalData}
+        canWrite={canWriteAcademyData}
+        isPreviewMode={isPreviewMode}
+        error={error}
+        onClose={closeModal}
+        onSubmit={(event) => void handleSave(event)}
+        onToggleAdditionalData={() => setShowAdditionalData((prev) => !prev)}
+        onFormChange={setForm}
+      />
     </>
-  );
-}
-
-function MobileInfo({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid gap-1">
-      <p className="text-[11px] uppercase tracking-wide text-muted">{label}</p>
-      <p className="break-words text-text">{value}</p>
-    </div>
-  );
-}
-
-function SectionTitle({ title }: { title: string }) {
-  return (
-    <div className="border-t border-slate-700 pt-4 first:border-t-0 first:pt-0">
-      <p className="text-xs uppercase tracking-wide text-muted">{title}</p>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  type = "text",
-  required = true
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-  required?: boolean;
-}) {
-  return (
-    <label className="grid gap-1">
-      {label}
-      <input
-        type={type}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
-        required={required}
-      />
-    </label>
-  );
-}
-
-function TextArea({
-  label,
-  value,
-  onChange,
-  placeholder
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <label className="grid gap-1">
-      {label}
-      <textarea
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        rows={3}
-        placeholder={placeholder}
-        className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
-      />
-    </label>
   );
 }

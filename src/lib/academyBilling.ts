@@ -112,6 +112,10 @@ export interface AcademyBillingSnapshot {
   payments: PaymentRecord[];
 }
 
+interface LoadAcademyBillingSnapshotOptions {
+  includePayments?: boolean;
+}
+
 export function normalizeMoney(value: unknown) {
   const amount = Number(value ?? 0);
   if (!Number.isFinite(amount)) return 0;
@@ -235,15 +239,21 @@ export function buildReminderLink(studentName: string, phone: string, concept: s
   return `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(buildReminderMessage(studentName, concept, balance))}`;
 }
 
-export async function loadAcademyBillingSnapshot(academyId: string): Promise<AcademyBillingSnapshot> {
+export async function loadAcademyBillingSnapshot(
+  academyId: string,
+  options: LoadAcademyBillingSnapshotOptions = {}
+): Promise<AcademyBillingSnapshot> {
   const academyPath = `academies/${academyId}`;
+  const includePayments = options.includePayments ?? true;
   const [academySnap, studentsSnap, disciplinesSnap, enrollmentsSnap, feesSnap, paymentsSnap] = await Promise.all([
     getDoc(doc(db, "academies", academyId)),
     getDocs(query(collection(db, `${academyPath}/students`), orderBy("fullName", "asc"))),
     getDocs(query(collection(db, `${academyPath}/disciplines`), orderBy("name", "asc"))),
     getDocs(collection(db, `${academyPath}/enrollments`)),
     getDocs(query(collection(db, `${academyPath}/fees`), orderBy("dueDate", "asc"))),
-    getDocs(query(collection(db, `${academyPath}/payments`), orderBy("paymentDate", "desc")))
+    includePayments
+      ? getDocs(query(collection(db, `${academyPath}/payments`), orderBy("paymentDate", "desc")))
+      : Promise.resolve(null)
   ]);
 
   const defaultBillingDay = resolveAcademyDefaultBillingDay(
@@ -329,7 +339,7 @@ export async function loadAcademyBillingSnapshot(academyId: string): Promise<Aca
     normalizeFeeRecord(docSnap.id, docSnap.data() as Record<string, unknown>, studentNameById, disciplineNameById)
   );
 
-  const payments = paymentsSnap.docs.map((docSnap) => {
+  const payments = paymentsSnap?.docs.map((docSnap) => {
     const data = docSnap.data();
     return {
       id: docSnap.id,
@@ -343,7 +353,7 @@ export async function loadAcademyBillingSnapshot(academyId: string): Promise<Aca
       createdAt: data.createdAt,
       createdBy: String(data.createdBy ?? "")
     } satisfies PaymentRecord;
-  });
+  }) ?? [];
 
   void studentById;
 

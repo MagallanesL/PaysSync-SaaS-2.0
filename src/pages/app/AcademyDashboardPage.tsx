@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
-import { generateMonthlyFeesForCenter, getCurrentPeriodParts, getFeePriorityWindow, loadAcademyBillingSnapshot, type AcademyBillingSnapshot } from "../../lib/academyBilling";
+import { getCurrentPeriodParts, getFeePriorityWindow, loadAcademyBillingSnapshot, type AcademyBillingSnapshot } from "../../lib/academyBilling";
 
 export function AcademyDashboardPage() {
   const { membership, isPreviewMode } = useAuth();
@@ -94,8 +94,7 @@ export function AcademyDashboardPage() {
       }
 
       if (!membership) return;
-      await generateMonthlyFeesForCenter(membership.academyId);
-      setSnapshot(await loadAcademyBillingSnapshot(membership.academyId));
+      setSnapshot(await loadAcademyBillingSnapshot(membership.academyId, { includePayments: false }));
     }
 
     void load();
@@ -125,6 +124,8 @@ export function AcademyDashboardPage() {
     const upcomingCount = currentFees.filter((fee) => fee.balance > 0 && getFeePriorityWindow(fee) >= 0 && getFeePriorityWindow(fee) <= 7).length;
     const paidCount = currentFees.filter((fee) => fee.status === "paid").length;
     const collectionRate = totalIssued > 0 ? Math.round((totalCollected / totalIssued) * 100) : 0;
+    const studentsWithDebt = new Set(currentFees.filter((fee) => fee.balance > 0).map((fee) => fee.studentId)).size;
+    const studentsUpToDate = Math.max(0, activeStudents.length - studentsWithDebt);
 
     return {
       totalIssued,
@@ -133,15 +134,51 @@ export function AcademyDashboardPage() {
       overdueCount,
       upcomingCount,
       paidCount,
-      collectionRate
+      collectionRate,
+      studentsWithDebt,
+      studentsUpToDate
     };
-  }, [currentFees]);
+  }, [activeStudents.length, currentFees]);
 
   const priorityFees = useMemo(() => {
     return [...currentFees]
       .filter((fee) => fee.balance > 0)
       .sort((a, b) => getFeePriorityWindow(a) - getFeePriorityWindow(b))
       .slice(0, 6);
+  }, [currentFees]);
+
+  const studentsWithDebt = useMemo(() => {
+    const debtByStudent = new Map<
+      string,
+      {
+        studentName: string;
+        totalPending: number;
+        overdueCount: number;
+        nextDueDate: string;
+        topConcept: string;
+      }
+    >();
+
+    for (const fee of currentFees.filter((item) => item.balance > 0)) {
+      const current = debtByStudent.get(fee.studentId);
+      const nextDueDate = current?.nextDueDate
+        ? (fee.dueDate < current.nextDueDate ? fee.dueDate : current.nextDueDate)
+        : fee.dueDate;
+
+      debtByStudent.set(fee.studentId, {
+        studentName: fee.studentName ?? "Alumno",
+        totalPending: (current?.totalPending ?? 0) + fee.balance,
+        overdueCount: (current?.overdueCount ?? 0) + (fee.status === "overdue" ? 1 : 0),
+        nextDueDate,
+        topConcept: current?.topConcept ?? fee.concept
+      });
+    }
+
+    return [...debtByStudent.values()].sort((a, b) => {
+      if (a.overdueCount !== b.overdueCount) return b.overdueCount - a.overdueCount;
+      if (a.totalPending !== b.totalPending) return b.totalPending - a.totalPending;
+      return a.studentName.localeCompare(b.studentName, "es", { sensitivity: "base" });
+    });
   }, [currentFees]);
 
   const dashboardTitle = membership?.academyName ? `Resumen de ${membership.academyName}` : "Resumen del centro";
@@ -152,28 +189,39 @@ export function AcademyDashboardPage() {
         title={dashboardTitle}
         action={
           <div className="flex gap-2">
-            <Link to="/app/fees" className="rounded-brand border border-[rgba(0,209,255,0.18)] px-3 py-2 text-xs text-[#00D1FF] transition hover:bg-[rgba(0,209,255,0.08)]">
-              Ver cuotas
+            <Link to="/app/fees" className="rounded-brand bg-primary px-3 py-2 text-xs font-semibold text-bg transition hover:brightness-110">
+              Registrar pago rapido
             </Link>
-            <Link to="/app/students" className="rounded-brand border border-[rgba(34,197,94,0.18)] px-3 py-2 text-xs text-[#22C55E] transition hover:bg-[rgba(34,197,94,0.08)]">
-              Crear alumno
+            <Link to="/app/fees" className="rounded-brand border border-[rgba(0,209,255,0.18)] px-3 py-2 text-xs text-[#00D1FF] transition hover:bg-[rgba(0,209,255,0.08)]">
+              Ver cobranza
             </Link>
           </div>
         }
       >
-        <div className="mb-4 rounded-brand border border-[rgba(0,209,255,0.15)] bg-[rgba(0,209,255,0.04)] p-4">
-          <p className="text-xs uppercase tracking-[0.24em] text-[#9FB0D0]">Ciclo actual</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <InfoPill label="Periodo operativo" value={`${String(currentPeriod.month).padStart(2, "0")}/${currentPeriod.year}`} />
-            <InfoPill label="Tasa cobrada" value={`${summary.collectionRate}% del total emitido`} />
+        <div className="mb-4 rounded-brand border border-[rgba(0,209,255,0.15)] bg-gradient-to-r from-[rgba(0,209,255,0.08)] via-[#0B0F1A] to-[rgba(34,197,94,0.06)] p-5">
+          <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+            <div>
+              <p className="text-xs uppercase tracking-[0.24em] text-[#9FB0D0]">Cobranza del mes</p>
+              <h2 className="mt-2 font-display text-3xl text-[#F5F7FB]">${summary.totalPending} pendientes de cobro</h2>
+              <p className="mt-2 max-w-2xl text-sm text-[#9FB0D0]">
+                En menos de 5 segundos deberías poder ver cuánto tenías que cobrar, cuánto ya ingresó y quién necesita seguimiento.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <InfoPill label="Periodo operativo" value={`${String(currentPeriod.month).padStart(2, "0")}/${currentPeriod.year}`} />
+              <InfoPill label="Tasa cobrada" value={`${summary.collectionRate}% del total esperado`} />
+              <InfoPill label="Alumnos con deuda" value={`${summary.studentsWithDebt}`} />
+              <InfoPill label="Al dia" value={`${summary.studentsUpToDate}`} />
+            </div>
           </div>
         </div>
 
-        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat title="Cobrado" value={`$${summary.totalCollected}`} color="text-[#22C55E]" helper="Pagado este ciclo" featured />
-          <Stat title="Saldo pendiente" value={`$${summary.totalPending}`} color="text-[#FF4D4F]" helper="Pendiente del ciclo" featured />
-          <Stat title="Alumnos activos" value={activeStudents.length} color="text-[#00D1FF]" helper="Base activa del centro" />
-          <Stat title="Cuotas cerradas" value={summary.paidCount} color="text-[#F5F7FB]" helper="Cuotas totalmente pagadas" />
+        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <Stat title="Total esperado del mes" value={`$${summary.totalIssued}`} color="text-[#00D1FF]" helper="Emitido para el ciclo actual" featured />
+          <Stat title="Total cobrado" value={`$${summary.totalCollected}`} color="text-[#22C55E]" helper="Ingresos registrados este mes" featured />
+          <Stat title="Total pendiente" value={`$${summary.totalPending}`} color="text-[#FF4D4F]" helper="Todavia por cobrar" featured />
+          <Stat title="Alumnos al dia" value={summary.studentsUpToDate} color="text-[#F5F7FB]" helper="Sin saldo pendiente este mes" />
+          <Stat title="Alumnos con deuda" value={summary.studentsWithDebt} color="text-[#F59E0B]" helper="Necesitan seguimiento" />
         </div>
 
         <div className="grid gap-3 lg:grid-cols-3">
@@ -183,7 +231,40 @@ export function AcademyDashboardPage() {
         </div>
       </Panel>
 
-      <div className="grid gap-4 lg:grid-cols-[1.3fr_0.9fr]">
+      <div className="grid gap-4 xl:grid-cols-[1.05fr_1.35fr]">
+        <Panel
+          title="Alumnos con deuda"
+          action={
+            <Link to="/app/fees" className="rounded-brand border border-[rgba(0,209,255,0.18)] px-3 py-2 text-xs text-[#00D1FF] transition hover:bg-[rgba(0,209,255,0.08)]">
+              Ir a cobranza
+            </Link>
+          }
+        >
+          {studentsWithDebt.length > 0 ? (
+            <div className="grid gap-3">
+              {studentsWithDebt.slice(0, 6).map((student) => (
+                <article key={`${student.studentName}-${student.topConcept}`} className="rounded-brand border border-slate-800 bg-[#0B0F1A] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium text-[#F5F7FB]">{student.studentName}</p>
+                      <p className="mt-1 text-sm text-[#9FB0D0]">{student.topConcept}</p>
+                    </div>
+                    <span className={`rounded-brand px-2 py-1 text-xs font-semibold ${student.overdueCount > 0 ? "bg-[#FF4D4F]/15 text-[#FF4D4F]" : "bg-[#F59E0B]/15 text-[#F59E0B]"}`}>
+                      {student.overdueCount > 0 ? "Con mora" : "Pendiente"}
+                    </span>
+                  </div>
+                  <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                    <MobileKpi label="Saldo" value={`$${student.totalPending}`} accent="text-[#FF4D4F]" />
+                    <MobileKpi label="Proximo vencimiento" value={student.nextDueDate} accent="text-[#F5F7FB]" />
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-[#9FB0D0]">No hay alumnos con deuda en el ciclo actual.</p>
+          )}
+        </Panel>
+
         <Panel title="Cuotas prioritarias">
           {priorityFees.length > 0 ? (
             <div className="grid gap-3">
@@ -242,15 +323,6 @@ export function AcademyDashboardPage() {
           ) : (
             <p className="text-sm text-[#9FB0D0]">No hay cuotas prioritarias pendientes para este ciclo.</p>
           )}
-        </Panel>
-
-        <Panel title="Acciones rapidas">
-          <div className="grid gap-2">
-            <QuickLink to="/app/disciplinas" label="Crear disciplina" helper="Define el valor base de la cuota." />
-            <QuickLink to="/app/students" label="Crear alumno" helper="Carga el alumno y asigna sus disciplinas." />
-            <QuickLink to="/app/fees" label="Registrar cobro" helper="Impacta el pago en cuotas y resumen." />
-            <QuickLink to="/app/settings" label="Configuracion" helper="Ajusta el centro sin competir con la operacion." />
-          </div>
         </Panel>
       </div>
     </div>
@@ -316,15 +388,6 @@ function StatusBadge({ status }: { status: "pending" | "partial" | "paid" | "ove
     >
       {status === "paid" ? "Pagada" : status === "overdue" ? "Vencida" : status === "partial" ? "Parcial" : "Pendiente"}
     </span>
-  );
-}
-
-function QuickLink({ to, label, helper }: { to: string; label: string; helper: string }) {
-  return (
-    <Link to={to} className="rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#0B0F1A] px-4 py-4 transition hover:border-[#00D1FF] hover:bg-[rgba(0,209,255,0.04)]">
-      <p className="text-sm font-medium text-[#F5F7FB]">{label}</p>
-      <p className="mt-1 text-xs text-[#9FB0D0]">{helper}</p>
-    </Link>
   );
 }
 

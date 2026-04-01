@@ -1,9 +1,14 @@
 import { serverTimestamp, updateDoc, doc } from "firebase/firestore";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  FeesMobileList,
+  FeesSummaryCard,
+  FeesTable
+} from "../../components/app/fees/FeeUI";
+import { PaymentModal, type PaymentFormState } from "../../components/app/fees/PaymentModal";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
 import {
-  buildReminderLink,
   formatPeriodLabel,
   generateMonthlyFeesForCenter,
   getCurrentPeriodParts,
@@ -11,18 +16,9 @@ import {
   loadAcademyBillingSnapshot,
   registerPayment,
   type AcademyBillingSnapshot,
-  type FeeRecord,
-  type PaymentMethod
+  type FeeRecord
 } from "../../lib/academyBilling";
-import { formatMembershipStatus, formatPaymentMethod } from "../../lib/display";
 import { db } from "../../lib/firebase";
-
-interface PaymentFormState {
-  amount: string;
-  paymentDate: string;
-  paymentMethod: PaymentMethod;
-  note: string;
-}
 
 const emptyForm: PaymentFormState = {
   amount: "",
@@ -139,8 +135,7 @@ export function FeesPage() {
     }
 
     if (!membership) return;
-    await generateMonthlyFeesForCenter(membership.academyId);
-    const billingSnapshot = await loadAcademyBillingSnapshot(membership.academyId);
+    const billingSnapshot = await loadAcademyBillingSnapshot(membership.academyId, { includePayments: false });
     setSnapshot(billingSnapshot);
   }
 
@@ -265,361 +260,45 @@ export function FeesPage() {
         </div>
 
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
-          <Summary label="Saldo pendiente" value={`$${stats.pendingBalance}`} color="text-[#FF4D4F]" helper="Dinero por cobrar" featured />
-          <Summary label="Vencidas" value={stats.overdue} color="text-[#FF4D4F]" helper="Requieren seguimiento" />
-          <Summary label="Por vencer" value={stats.upcoming} color="text-[#F59E0B]" helper="Vencen pronto" />
-          <Summary label="Parciales" value={stats.partial} color="text-[#00D1FF]" helper="Cobros incompletos" />
+          <FeesSummaryCard label="Saldo pendiente" value={`$${stats.pendingBalance}`} color="text-[#FF4D4F]" helper="Dinero por cobrar" featured />
+          <FeesSummaryCard label="Vencidas" value={stats.overdue} color="text-[#FF4D4F]" helper="Requieren seguimiento" />
+          <FeesSummaryCard label="Por vencer" value={stats.upcoming} color="text-[#F59E0B]" helper="Vencen pronto" />
+          <FeesSummaryCard label="Parciales" value={stats.partial} color="text-[#00D1FF]" helper="Cobros incompletos" />
         </div>
 
-        <div className="space-y-3 md:hidden">
-          {feeRows.map((fee) => {
-            const student = snapshot?.students.find((item) => item.id === fee.studentId);
-            const whatsappUrl = buildReminderLink(
-              fee.studentName ?? "Alumno",
-              student?.phone ?? student?.emergencyContactPhone ?? "",
-              fee.concept,
-              fee.balance
-            );
+        <FeesMobileList
+          fees={feeRows}
+          snapshot={snapshot}
+          canWrite={canWriteAcademyData}
+          isPreviewMode={isPreviewMode}
+          onRegisterPayment={openPaymentModal}
+          onReminderClick={(fee) => void handleMarkReminderSent(fee)}
+          onGenerateFees={() => void handleGenerateCurrentMonthFees()}
+        />
 
-            return (
-              <article key={fee.id} className="rounded-brand border border-slate-800 bg-bg p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-semibold text-text">{fee.studentName}</p>
-                    <p className="break-words text-sm text-muted">{fee.concept}</p>
-                  </div>
-                  <StatusBadge status={fee.status} />
-                </div>
-
-                <div className="mt-3 grid gap-2 text-sm text-muted">
-                  <MobileInfo label="Total" value={`$${fee.totalAmount}`} />
-                  <MobileInfo label="Pagado" value={`$${fee.amountPaid}`} />
-                  <MobileInfo label="Saldo" value={`$${fee.balance}`} />
-                  <MobileInfo label="Vencimiento" value={fee.dueDate} />
-                </div>
-
-                <div className="mt-4 flex flex-col gap-2">
-                  <button
-                    type="button"
-                    onClick={() => openPaymentModal(fee)}
-                    disabled={!canWriteAcademyData || isPreviewMode || fee.balance === 0}
-                    className="rounded-brand bg-primary px-3 py-2 text-sm font-semibold text-bg disabled:opacity-40"
-                  >
-                    Registrar pago
-                  </button>
-                  {whatsappUrl ? (
-                    <a
-                      href={whatsappUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={() => void handleMarkReminderSent(fee)}
-                      className="rounded-brand border border-secondary/30 px-3 py-2 text-center text-sm text-secondary hover:bg-secondary/10"
-                    >
-                      Enviar recordatorio
-                    </a>
-                  ) : (
-                    <p className="text-sm text-muted">Aviso pendiente sin telefono cargado</p>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-          {feeRows.length === 0 && (
-            <div className="rounded-brand border border-slate-800 bg-[#0B0F1A] p-4">
-              <p className="text-sm text-text">Todavia no tenes cuotas este mes.</p>
-              <p className="mt-2 text-xs text-muted">
-                Crea un alumno, asignale una disciplina o genera las cuotas del periodo para empezar a cobrar.
-              </p>
-              <div className="mt-3 flex flex-col gap-2">
-                <a href="/app/students" className="rounded-brand bg-primary px-3 py-2 text-center text-xs font-semibold text-bg">
-                  Crear alumno
-                </a>
-                <a href="/app/students" className="rounded-brand border border-secondary/30 px-3 py-2 text-center text-xs text-secondary hover:bg-secondary/10">
-                  Asignar disciplina
-                </a>
-                <button
-                  type="button"
-                  onClick={() => void handleGenerateCurrentMonthFees()}
-                  disabled={!canWriteAcademyData || isPreviewMode}
-                  className="rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
-                >
-                  Generar cuotas
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="hidden overflow-x-auto md:block">
-          <table className="min-w-full text-sm">
-            <thead className="text-left text-muted">
-              <tr>
-                <th className="px-3 py-2">Alumno</th>
-                <th className="px-3 py-2">Concepto</th>
-                <th className="px-3 py-2">Saldo</th>
-                <th className="px-3 py-2">Vencimiento</th>
-                <th className="px-3 py-2">Estado</th>
-                <th className="px-3 py-2">Accion</th>
-              </tr>
-            </thead>
-            <tbody>
-              {feeRows.map((fee) => {
-                const student = snapshot?.students.find((item) => item.id === fee.studentId);
-                const whatsappUrl = buildReminderLink(
-                  fee.studentName ?? "Alumno",
-                  student?.phone ?? student?.emergencyContactPhone ?? "",
-                  fee.concept,
-                  fee.balance
-                );
-
-                return (
-                  <tr key={fee.id} className="border-t border-slate-800">
-                    <td className="px-3 py-3 text-muted">{fee.studentName}</td>
-                    <td className="px-3 py-3">
-                      <p className="font-medium text-text">{fee.concept}</p>
-                      <p className="text-xs text-muted">
-                        Periodo {formatPeriodLabel(fee.periodYear, fee.periodMonth)}
-                      </p>
-                    </td>
-                    <td className="px-3 py-3 font-semibold text-warning">${fee.balance}</td>
-                    <td className="px-3 py-3 text-muted">{fee.dueDate}</td>
-                    <td className="px-3 py-3">
-                      <StatusBadge status={fee.status} />
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openPaymentModal(fee)}
-                          disabled={!canWriteAcademyData || isPreviewMode || fee.balance === 0}
-                          className="rounded-brand border border-primary/40 px-2 py-1 text-xs text-primary hover:bg-primary/10 disabled:opacity-40"
-                        >
-                          Registrar pago
-                        </button>
-                        {whatsappUrl ? (
-                          <a
-                            href={whatsappUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={() => void handleMarkReminderSent(fee)}
-                            className="rounded-brand border border-secondary/30 px-2 py-1 text-xs text-secondary hover:bg-secondary/10"
-                          >
-                            Enviar recordatorio
-                          </a>
-                        ) : (
-                          <span className="text-xs text-muted">Sin telefono</span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {feeRows.length === 0 && (
-                <tr>
-                  <td className="px-3 py-6" colSpan={6}>
-                    <div className="flex flex-col items-start gap-3 rounded-brand border border-slate-800 bg-[#0B0F1A] p-4">
-                      <p className="text-sm text-text">Todavia no tenes cuotas este mes.</p>
-                      <p className="text-xs text-muted">
-                        Crea un alumno, asignale una disciplina o genera las cuotas del periodo para empezar a cobrar.
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        <a href="/app/students" className="rounded-brand bg-primary px-3 py-2 text-xs font-semibold text-bg">
-                          Crear alumno
-                        </a>
-                        <a href="/app/students" className="rounded-brand border border-secondary/30 px-3 py-2 text-xs text-secondary hover:bg-secondary/10">
-                          Asignar disciplina
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => void handleGenerateCurrentMonthFees()}
-                          disabled={!canWriteAcademyData || isPreviewMode}
-                          className="rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
-                        >
-                          Generar cuotas
-                        </button>
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <FeesTable
+          fees={feeRows}
+          snapshot={snapshot}
+          canWrite={canWriteAcademyData}
+          isPreviewMode={isPreviewMode}
+          onRegisterPayment={openPaymentModal}
+          onReminderClick={(fee) => void handleMarkReminderSent(fee)}
+          onGenerateFees={() => void handleGenerateCurrentMonthFees()}
+          formatPeriodLabel={formatPeriodLabel}
+        />
       </Panel>
 
-      {isModalOpen && selectedFee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="fee-modal-title"
-            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-brand border border-slate-700/80 bg-surface p-4 shadow-soft"
-          >
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <h2 id="fee-modal-title" className="font-display text-lg text-text">
-                  Registrar pago
-                </h2>
-                <p className="mt-1 text-xs text-muted">
-                  Registra un pago total o parcial. El saldo y el estado se recalculan en el momento.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeModal}
-                className="rounded-brand border border-slate-600 px-2 py-1 text-xs text-muted hover:border-primary hover:text-primary"
-              >
-                Cerrar
-              </button>
-            </div>
-
-            <form onSubmit={(event) => void handleSavePayment(event)} className="grid gap-3 text-sm">
-              <div className="grid gap-3 rounded-brand border border-slate-700 bg-bg p-3 md:grid-cols-4">
-                <Info label="Total" value={`$${selectedFee.totalAmount}`} />
-                <Info label="Pagado" value={`$${selectedFee.amountPaid}`} />
-                <Info label="Saldo" value={`$${selectedFee.balance}`} />
-                <Info label="Estado" value={formatMembershipStatus(selectedFee.status)} />
-              </div>
-
-              <Field label="Monto a registrar" type="number" value={form.amount} onChange={(value) => setForm((prev) => ({ ...prev, amount: value }))} />
-              <Field label="Fecha de pago" type="date" value={form.paymentDate} onChange={(value) => setForm((prev) => ({ ...prev, paymentDate: value }))} />
-              <label className="grid gap-1">
-                Metodo de pago
-                <select
-                  value={form.paymentMethod}
-                  onChange={(event) => setForm((prev) => ({ ...prev, paymentMethod: event.target.value as PaymentMethod }))}
-                  className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
-                >
-                  <option value="cash">{formatPaymentMethod("cash")}</option>
-                  <option value="transfer">{formatPaymentMethod("transfer")}</option>
-                  <option value="other">Otro</option>
-                </select>
-              </label>
-              <TextArea label="Nota" value={form.note} onChange={(value) => setForm((prev) => ({ ...prev, note: value }))} placeholder="Opcional" />
-
-              {formError && <p className="text-xs text-danger">{formError}</p>}
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={closeModal} className="rounded-brand border border-slate-600 px-3 py-2 text-muted">
-                  Cancelar
-                </button>
-                <button disabled={!canWriteAcademyData || isPreviewMode} className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40">
-                  {isPreviewMode ? "Modo demo" : "Guardar pago"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <PaymentModal
+        isOpen={isModalOpen}
+        fee={selectedFee}
+        form={form}
+        formError={formError}
+        canWrite={canWriteAcademyData}
+        isPreviewMode={isPreviewMode}
+        onClose={closeModal}
+        onSubmit={(event) => void handleSavePayment(event)}
+        onFormChange={setForm}
+      />
     </>
-  );
-}
-
-function MobileInfo({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid gap-1">
-      <p className="text-[11px] uppercase tracking-wide text-muted">{label}</p>
-      <p className="break-words text-text">{value}</p>
-    </div>
-  );
-}
-
-function Summary({
-  label,
-  value,
-  color,
-  helper,
-  featured = false
-}: {
-  label: string;
-  value: number | string;
-  color: string;
-  helper?: string;
-  featured?: boolean;
-}) {
-  return (
-    <div className={`rounded-brand border p-3 ${featured ? "border-[rgba(255,77,79,0.28)] bg-[rgba(255,77,79,0.06)]" : "border-slate-700 bg-bg"}`}>
-      <p className="text-xs uppercase text-muted">{label}</p>
-      <p className={`mt-1 font-display text-xl ${color}`}>{value}</p>
-      {helper ? <p className="mt-2 text-xs text-muted">{helper}</p> : null}
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: FeeRecord["status"] }) {
-  return (
-    <span
-      className={`rounded-brand px-2 py-1 text-xs font-semibold ${
-        status === "paid"
-          ? "bg-secondary/15 text-secondary"
-          : status === "partial"
-            ? "bg-warning/15 text-warning"
-            : status === "overdue"
-              ? "bg-danger/15 text-danger"
-              : "bg-primary/15 text-primary"
-      }`}
-    >
-      {formatMembershipStatus(status)}
-    </span>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-xs uppercase text-muted">{label}</p>
-      <p className="mt-1 font-semibold text-text">{value}</p>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  type = "text"
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-}) {
-  return (
-    <label className="grid gap-1">
-      {label}
-      <input
-        type={type}
-        min="0"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
-        required
-      />
-    </label>
-  );
-}
-
-function TextArea({
-  label,
-  value,
-  onChange,
-  placeholder
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <label className="grid gap-1">
-      {label}
-      <textarea
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        rows={3}
-        placeholder={placeholder}
-        className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
-      />
-    </label>
   );
 }
