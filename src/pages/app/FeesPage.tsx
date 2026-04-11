@@ -2,6 +2,7 @@ import {
   addDoc,
   collection,
   doc,
+  getDoc,
   getDocs,
   orderBy,
   query,
@@ -14,12 +15,18 @@ import { useAuth } from "../../contexts/AuthContext";
 import { formatBillingType, formatMembershipStatus } from "../../lib/display";
 import { db } from "../../lib/firebase";
 import {
+  applyBillingSettingsToFee,
+  compareFeePriority,
+  DEFAULT_ACADEMY_BILLING_SETTINGS,
+  type AcademyBillingSettings,
   type FeeCategory,
   type FeePaymentMode,
   type FeeStatus,
   diffDays,
+  getDaysOverdue,
   getFeeBalance,
   getTodayIso,
+  normalizeAcademyBillingSettings,
   normalizePaidAmount,
   resolveFeeStatus,
   resolvePaymentMode
@@ -66,15 +73,13 @@ interface Fee {
 }
 
 interface FeeFormState {
-  amount: string;
   paidAmount: string;
-  dueDate: string;
+  paymentState: "none" | "partial" | "full";
 }
 
 const emptyForm: FeeFormState = {
-  amount: "",
   paidAmount: "",
-  dueDate: ""
+  paymentState: "none"
 };
 
 function getCurrentPeriod() {
@@ -82,9 +87,9 @@ function getCurrentPeriod() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function getDefaultDueDate(period: string) {
+function getDefaultDueDateForDay(period: string, dueDay: number) {
   const [year, month] = period.split("-");
-  return `${year}-${month}-10`;
+  return `${year}-${month}-${String(dueDay).padStart(2, "0")}`;
 }
 
 function formatPeriodLabel(period?: string) {
@@ -105,19 +110,8 @@ function sortFees(fees: Fee[], students: StudentOption[]) {
   const studentNames = new Map(students.map((student) => [student.id, student.fullName]));
 
   return [...fees].sort((a, b) => {
-    const aDays = diffDays(a.dueDate);
-    const bDays = diffDays(b.dueDate);
-    const aIsDebt = a.balance > 0;
-    const bIsDebt = b.balance > 0;
-    const aIsOverdueDebt = aDays < 0 && aIsDebt;
-    const bIsOverdueDebt = bDays < 0 && bIsDebt;
-    const aIsUpcomingDebt = aDays >= 0 && aIsDebt;
-    const bIsUpcomingDebt = bDays >= 0 && bIsDebt;
-
-    if (aIsOverdueDebt !== bIsOverdueDebt) return aIsOverdueDebt ? -1 : 1;
-    if (aIsUpcomingDebt !== bIsUpcomingDebt) return aIsUpcomingDebt ? -1 : 1;
-    if (aDays !== bDays) return aDays - bDays;
-
+    const priority = compareFeePriority(a, b);
+    if (priority !== 0) return priority;
     const aName = studentNames.get(a.studentId) ?? a.studentId;
     const bName = studentNames.get(b.studentId) ?? b.studentId;
     return aName.localeCompare(bName, "es", { sensitivity: "base" });
@@ -195,6 +189,7 @@ export function FeesPage() {
   const [form, setForm] = useState<FeeFormState>(emptyForm);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [billingSettings, setBillingSettings] = useState<AcademyBillingSettings>(DEFAULT_ACADEMY_BILLING_SETTINGS);
   const academyPath = membership ? `academies/${membership.academyId}` : null;
 
   async function syncAssignedFees(studentsList: StudentOption[], disciplinesList: DisciplineCatalogItem[], feesList: Fee[]) {
@@ -226,7 +221,7 @@ export function FeesPage() {
           const key = `${student.id}-${discipline.disciplineId}-${currentPeriod}`;
           const existing = monthlyByKey.get(key);
           const nextConcept = buildMonthlyConcept(discipline.name, currentPeriod);
-          const nextDueDate = existing?.dueDate ?? getDefaultDueDate(currentPeriod);
+          const nextDueDate = existing?.dueDate ?? getDefaultDueDateForDay(currentPeriod, billingSettings.defaultDueDay);
 
           if (!existing) {
             await addDoc(collection(db, `${academyPath}/fees`), {
@@ -409,15 +404,25 @@ export function FeesPage() {
 
       setStudents(previewStudents);
       setFees(previewFees);
+      setBillingSettings({
+        defaultDueDay: 10,
+        lateFeeEnabled: true,
+        lateFeeStartsAfterDays: 3,
+        lateFeeType: "fixed",
+        lateFeeValue: 2500
+      });
       return;
     }
 
     if (!academyPath) return;
-    const [studentsSnap, disciplinesSnap, feesSnap] = await Promise.all([
+    const [academySnap, studentsSnap, disciplinesSnap, feesSnap] = await Promise.all([
+      getDoc(doc(db, "academies", membership!.academyId)),
       getDocs(query(collection(db, `${academyPath}/students`), orderBy("fullName", "asc"))),
       getDocs(query(collection(db, `${academyPath}/disciplines`), orderBy("name", "asc"))),
       getDocs(query(collection(db, `${academyPath}/fees`), orderBy("dueDate", "asc")))
     ]);
+    const nextBillingSettings = normalizeAcademyBillingSettings(academySnap.exists() ? academySnap.data().billingSettings : undefined);
+    setBillingSettings(nextBillingSettings);
 
     const loadedDisciplines: DisciplineCatalogItem[] = disciplinesSnap.docs.map((docSnap) => ({
       id: docSnap.id,
@@ -442,18 +447,21 @@ export function FeesPage() {
       )
     }));
 
-    const loadedFees: Fee[] = feesSnap.docs.map((docSnap) => ({
+    const loadedFeesBase: Fee[] = feesSnap.docs.map((docSnap) => ({
       id: docSnap.id,
       ...normalizeFee(docSnap.data() as Omit<Fee, "id">)
     }));
 
-    await syncAssignedFees(loadedStudents, loadedDisciplines, loadedFees);
+    await syncAssignedFees(loadedStudents, loadedDisciplines, loadedFeesBase);
 
     const refreshedFeesSnap = await getDocs(query(collection(db, `${academyPath}/fees`), orderBy("dueDate", "asc")));
-    const refreshedFees = refreshedFeesSnap.docs.map((docSnap) => ({
-      id: docSnap.id,
-      ...normalizeFee(docSnap.data() as Omit<Fee, "id">)
-    }));
+    const refreshedFees = refreshedFeesSnap.docs.map((docSnap) => {
+      const normalizedFee = normalizeFee(docSnap.data() as Omit<Fee, "id">);
+      return {
+        id: docSnap.id,
+        ...applyBillingSettingsToFee(normalizedFee, nextBillingSettings)
+      };
+    });
 
     setStudents(loadedStudents);
     setFees(sortFees(refreshedFees, loadedStudents));
@@ -491,10 +499,12 @@ export function FeesPage() {
       .map((fee) => {
         const student = students.find((item) => item.id === fee.studentId);
         const daysLeft = diffDays(fee.dueDate);
+        const daysOverdue = getDaysOverdue(fee.dueDate);
         return {
           ...fee,
           studentName: student?.fullName ?? fee.studentId,
           daysLeft,
+          daysOverdue,
           whatsappUrl: buildWhatsAppLink(
             student?.fullName ?? fee.studentId,
             student?.contactPhone ?? "",
@@ -510,8 +520,23 @@ export function FeesPage() {
     event.preventDefault();
     if (!canWriteAcademyData || !academyPath || !editingFee || isPreviewMode) return;
 
-    const nextAmount = Number(form.amount || 0);
-    const nextPaidAmount = normalizePaidAmount(nextAmount, Number(form.paidAmount || 0));
+    const nextAmount = editingFee.amount;
+    const nextPaidAmount =
+      form.paymentState === "full"
+        ? nextAmount
+        : form.paymentState === "partial"
+          ? normalizePaidAmount(nextAmount, Number(form.paidAmount || 0))
+          : 0;
+
+    if (form.paymentState === "partial" && !editingFee.partialAllowed) {
+      setFormError("Esta cuota no permite pagos parciales. Marca pago total o no pago.");
+      return;
+    }
+
+    if (form.paymentState === "partial" && nextPaidAmount <= 0) {
+      setFormError("Ingresa un monto parcial mayor a 0.");
+      return;
+    }
 
     if (!editingFee.partialAllowed && nextPaidAmount > 0 && nextPaidAmount < nextAmount) {
       setFormError("Esta cuota no permite entregas parciales. Registra 0 o el total completo.");
@@ -521,13 +546,11 @@ export function FeesPage() {
     const nextStatus = resolveFeeStatus({
       amount: nextAmount,
       paidAmount: nextPaidAmount,
-      dueDate: form.dueDate
+      dueDate: editingFee.dueDate
     });
 
     await updateDoc(doc(db, `${academyPath}/fees`, editingFee.id), {
-      amount: nextAmount,
       paidAmount: nextPaidAmount,
-      dueDate: form.dueDate,
       status: nextStatus,
       updatedAt: serverTimestamp()
     });
@@ -539,9 +562,8 @@ export function FeesPage() {
   function openEditModal(fee: Fee) {
     setEditingFee(fee);
     setForm({
-      amount: String(fee.amount),
-      paidAmount: String(fee.paidAmount),
-      dueDate: fee.dueDate
+      paidAmount: fee.paidAmount > 0 && fee.paidAmount < fee.amount ? String(fee.paidAmount) : "",
+      paymentState: fee.paidAmount >= fee.amount ? "full" : fee.paidAmount > 0 ? "partial" : "none"
     });
     setFormError(null);
     setIsModalOpen(true);
@@ -574,10 +596,10 @@ export function FeesPage() {
         <div className="mb-3 flex flex-wrap gap-3 text-xs text-muted">
           <span>En seguimiento: {stats.visible}</span>
           <span>Total de cuotas: {stats.total}</span>
-          <span>Orden: mas vencidas primero</span>
+          <span>Orden: mas dias de mora primero</span>
         </div>
 
-        <div className="space-y-3 md:hidden">
+        <div className="space-y-3 xl:hidden">
           {trackingRows.map((fee) => (
             <article key={fee.id} className="rounded-brand border border-slate-800 bg-bg p-4">
               <div className="flex items-start justify-between gap-3">
@@ -585,7 +607,7 @@ export function FeesPage() {
                   <p className="font-semibold text-text">{fee.studentName}</p>
                   <p className="break-words text-sm text-muted">{fee.disciplineName ?? fee.observation ?? fee.concept}</p>
                 </div>
-                <PriorityBadge daysLeft={fee.daysLeft} />
+                <PriorityBadge daysLeft={fee.daysLeft} daysOverdue={fee.daysOverdue} />
               </div>
 
               <div className="mt-3 grid gap-2 text-sm text-muted">
@@ -632,9 +654,9 @@ export function FeesPage() {
                   type="button"
                   onClick={() => openEditModal(fee)}
                   disabled={!canWriteAcademyData || isPreviewMode}
-                  className="w-full rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
+                  className="w-full rounded-brand bg-primary/15 px-3 py-2 text-xs font-semibold text-primary transition hover:bg-primary hover:text-bg disabled:opacity-40"
                 >
-                  Gestionar
+                  Registrar pago
                 </button>
               </div>
             </article>
@@ -643,59 +665,59 @@ export function FeesPage() {
             <p className="text-sm text-muted">No hay cuotas para seguir dentro de los proximos 15 dias.</p>
           )}
         </div>
-        <div className="hidden overflow-x-auto md:block">
-          <table className="min-w-full text-sm">
+        <div className="hidden xl:block">
+          <table className="min-w-full table-fixed text-xs 2xl:text-sm">
             <thead className="text-left text-muted">
               <tr>
-                <th className="px-3 py-2">Prioridad</th>
-                <th className="px-3 py-2">Alumno</th>
-                <th className="px-3 py-2">Concepto</th>
-                <th className="px-3 py-2">Modalidad</th>
-                <th className="px-3 py-2">Total</th>
-                <th className="px-3 py-2">Entregado</th>
-                <th className="px-3 py-2">Saldo</th>
-                <th className="px-3 py-2">Vencimiento</th>
-                <th className="px-3 py-2">Estado</th>
-                <th className="px-3 py-2">WhatsApp</th>
-                <th className="px-3 py-2">Accion</th>
+                <th className="w-[10%] px-2 py-2">Prioridad</th>
+                <th className="w-[12%] px-2 py-2">Alumno</th>
+                <th className="w-[20%] px-2 py-2">Concepto</th>
+                <th className="w-[9%] px-2 py-2">Modalidad</th>
+                <th className="w-[8%] px-2 py-2">Total</th>
+                <th className="w-[8%] px-2 py-2">Entregado</th>
+                <th className="w-[8%] px-2 py-2">Saldo</th>
+                <th className="w-[9%] px-2 py-2">Vencimiento</th>
+                <th className="w-[7%] px-2 py-2">Estado</th>
+                <th className="w-[4%] px-2 py-2 text-center">WhatsApp</th>
+                <th className="w-[5%] px-2 py-2 text-right">Accion</th>
               </tr>
             </thead>
             <tbody>
               {trackingRows.map((fee) => {
                 return (
                   <tr key={fee.id} className="border-t border-slate-800">
-                    <td className="px-3 py-3">
-                      <PriorityBadge daysLeft={fee.daysLeft} />
+                    <td className="px-2 py-3 align-top">
+                      <PriorityBadge daysLeft={fee.daysLeft} daysOverdue={fee.daysOverdue} />
                     </td>
-                    <td className="px-3 py-3 text-muted">{fee.studentName}</td>
-                    <td className="px-3 py-3">
+                    <td className="px-2 py-3 align-top text-muted">{fee.studentName}</td>
+                    <td className="px-2 py-3 align-top">
                       <p className="font-medium text-text">{fee.disciplineName ?? fee.observation ?? fee.concept}</p>
                       <p className="text-xs text-muted">
                         {fee.period ? `Periodo ${formatPeriodLabel(fee.period)}` : fee.concept}
                       </p>
                     </td>
-                    <td className="px-3 py-3 text-muted">
+                    <td className="px-2 py-3 align-top text-muted">
                       {fee.paymentMode === "monthly"
                         ? "Mensual"
                         : fee.partialAllowed
                           ? "Entrega parcial"
                           : "Cargo unico"}
                     </td>
-                    <td className="px-3 py-3 font-semibold text-primary">${fee.amount}</td>
-                    <td className="px-3 py-3 text-secondary">${fee.paidAmount}</td>
-                    <td className="px-3 py-3 font-semibold text-warning">${fee.balance}</td>
-                    <td className="px-3 py-3 text-muted">{fee.dueDate}</td>
-                    <td className="px-3 py-3">
+                    <td className="px-2 py-3 align-top font-semibold text-primary">${fee.amount}</td>
+                    <td className="px-2 py-3 align-top text-secondary">${fee.paidAmount}</td>
+                    <td className="px-2 py-3 align-top font-semibold text-warning">${fee.balance}</td>
+                    <td className="px-2 py-3 align-top text-muted">{fee.dueDate}</td>
+                    <td className="px-2 py-3 align-top">
                       <StatusBadge status={fee.status} />
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="px-2 py-3 align-top text-center">
                       {fee.whatsappUrl ? (
                         <a
                           href={fee.whatsappUrl}
                           target="_blank"
                           rel="noreferrer"
                           aria-label={`Enviar WhatsApp a ${fee.studentName}`}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-secondary/15 text-secondary transition hover:bg-secondary/25"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-secondary/15 text-secondary transition hover:bg-secondary/25"
                         >
                           <WhatsAppIcon />
                         </a>
@@ -703,14 +725,14 @@ export function FeesPage() {
                         <span className="text-xs text-muted">Sin aviso</span>
                       )}
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="px-2 py-3 align-top text-right">
                       <button
                         type="button"
                         onClick={() => openEditModal(fee)}
                         disabled={!canWriteAcademyData || isPreviewMode}
-                        className="rounded-brand border border-slate-600 px-2 py-1 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
+                        className="rounded-brand bg-primary/15 px-2 py-1 text-[11px] font-semibold text-primary transition hover:bg-primary hover:text-bg disabled:opacity-40"
                       >
-                        Gestionar
+                        Registrar pago
                       </button>
                     </td>
                   </tr>
@@ -739,10 +761,10 @@ export function FeesPage() {
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h2 id="fee-modal-title" className="font-display text-lg text-text">
-                  Gestionar cuota
+                  Registrar pago
                 </h2>
                 <p className="mt-1 text-xs text-muted">
-                  Actualiza vencimiento y lo ya entregado. El estado se calcula automaticamente.
+                  Marca si no pago, si pago parcial o si ya pago el total. El resumen se actualiza automaticamente.
                 </p>
               </div>
               <button
@@ -756,34 +778,62 @@ export function FeesPage() {
 
             <form onSubmit={(event) => void handleSave(event)} className="grid gap-3 text-sm">
               <div className="grid gap-3 rounded-brand border border-slate-700 bg-bg p-3 md:grid-cols-3">
-                <Info label="Categoria" value={formatBillingType(editingFee.category)} />
+                <Info label="Total cuota" value={`$${editingFee.amount}`} />
+                <Info label="Ya abonado" value={`$${editingFee.paidAmount}`} />
                 <Info label="Saldo actual" value={`$${editingFee.balance}`} />
-                <Info label="Estado actual" value={formatMembershipStatus(editingFee.status)} />
               </div>
 
-              <Field
-                label="Monto total"
-                type="number"
-                value={form.amount}
-                onChange={(value) => setForm((prev) => ({ ...prev, amount: value }))}
-              />
-              <Field
-                label={editingFee.partialAllowed ? "Monto entregado" : "Monto cobrado"}
-                type="number"
-                value={form.paidAmount}
-                onChange={(value) => setForm((prev) => ({ ...prev, paidAmount: value }))}
-              />
-              <Field
-                label="Vencimiento"
-                type="date"
-                value={form.dueDate}
-                onChange={(value) => setForm((prev) => ({ ...prev, dueDate: value }))}
-              />
+              <div className="grid gap-2 rounded-brand border border-slate-700 bg-bg p-3">
+                <p className="text-xs uppercase tracking-wide text-muted">Estado del pago</p>
+                <label className="flex items-center gap-2 text-text">
+                  <input
+                    type="radio"
+                    name="paymentState"
+                    checked={form.paymentState === "none"}
+                    onChange={() => setForm((prev) => ({ ...prev, paymentState: "none", paidAmount: "" }))}
+                  />
+                  No pago
+                </label>
+                <label className={`flex items-center gap-2 ${editingFee.partialAllowed ? "text-text" : "text-muted"}`}>
+                  <input
+                    type="radio"
+                    name="paymentState"
+                    checked={form.paymentState === "partial"}
+                    disabled={!editingFee.partialAllowed}
+                    onChange={() =>
+                      setForm((prev) => ({
+                        ...prev,
+                        paymentState: "partial",
+                        paidAmount: prev.paidAmount || String(editingFee.paidAmount > 0 ? editingFee.paidAmount : "")
+                      }))
+                    }
+                  />
+                  Pago parcial
+                </label>
+                <label className="flex items-center gap-2 text-text">
+                  <input
+                    type="radio"
+                    name="paymentState"
+                    checked={form.paymentState === "full"}
+                    onChange={() => setForm((prev) => ({ ...prev, paymentState: "full", paidAmount: String(editingFee.amount) }))}
+                  />
+                  Pago total
+                </label>
+              </div>
+
+              {form.paymentState === "partial" && (
+                <Field
+                  label="Monto abonado"
+                  type="number"
+                  value={form.paidAmount}
+                  onChange={(value) => setForm((prev) => ({ ...prev, paidAmount: value }))}
+                />
+              )}
 
               <p className="text-xs text-muted">
                 {editingFee.partialAllowed
-                  ? "Puedes registrar una entrega parcial o completar el total desde esta misma cuota."
-                  : "Esta cuota se resuelve en un solo pago, sin entregas parciales."}
+                  ? "Si eliges pago parcial, ingresa el monto acumulado abonado para esta cuota."
+                  : "Esta cuota solo admite no pago o pago total."}
               </p>
 
               {formError && <p className="text-xs text-danger">{formError}</p>}
@@ -800,7 +850,7 @@ export function FeesPage() {
                   disabled={!canWriteAcademyData || isPreviewMode}
                   className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40"
                 >
-                  {isPreviewMode ? "Modo demo" : "Guardar cambios"}
+                  Guardar cambios
                 </button>
               </div>
             </form>
@@ -847,9 +897,9 @@ function StatusBadge({ status }: { status: FeeStatus }) {
   );
 }
 
-function PriorityBadge({ daysLeft }: { daysLeft: number }) {
-  if (daysLeft < 0) {
-    return <span className="rounded-brand bg-danger/15 px-2 py-1 text-xs font-semibold text-danger">Vencida</span>;
+function PriorityBadge({ daysLeft, daysOverdue }: { daysLeft: number; daysOverdue: number }) {
+  if (daysOverdue > 0) {
+    return <span className="rounded-brand bg-danger/15 px-2 py-1 text-xs font-semibold text-danger">{daysOverdue} dia{daysOverdue === 1 ? "" : "s"} de mora</span>;
   }
   if (daysLeft === 0) {
     return <span className="rounded-brand bg-danger/15 px-2 py-1 text-xs font-semibold text-danger">Vence hoy</span>;

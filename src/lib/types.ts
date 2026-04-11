@@ -55,5 +55,12 @@ export interface Academy {
     lastPaidAt?: unknown;
     amount?: number;
   };
+  billingSettings?: {
+    defaultDueDay?: number;
+    lateFeeEnabled?: boolean;
+    lateFeeStartsAfterDays?: number;
+    lateFeeType?: "fixed" | "percent";
+    lateFeeValue?: number;
+  };
   createdAt?: unknown;
 }

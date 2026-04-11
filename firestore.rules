@@ -54,6 +54,28 @@ service cloud.firestore {
       return isAcademyMember(academyId) && (academyRole(academyId) == "owner" || academyRole(academyId) == "staff");
     }
 
+    function validBillingSettings() {
+      return request.resource.data.billingSettings is map
+        && request.resource.data.billingSettings.defaultDueDay is int
+        && request.resource.data.billingSettings.defaultDueDay >= 1
+        && request.resource.data.billingSettings.defaultDueDay <= 28
+        && request.resource.data.billingSettings.lateFeeEnabled is bool
+        && request.resource.data.billingSettings.lateFeeStartsAfterDays is int
+        && request.resource.data.billingSettings.lateFeeStartsAfterDays >= 1
+        && (
+          request.resource.data.billingSettings.lateFeeType == "fixed"
+          || request.resource.data.billingSettings.lateFeeType == "percent"
+        )
+        && request.resource.data.billingSettings.lateFeeValue is int
+        && request.resource.data.billingSettings.lateFeeValue >= 0;
+    }
+
+    function canUpdateAcademyOperationalSettings(academyId) {
+      return canWriteAcademyData(academyId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["billingSettings", "updatedAt"])
+        && validBillingSettings();
+    }
+
     function validClientManagedUserProfile() {
       return request.resource.data.email is string
         && request.resource.data.displayName is string
@@ -100,7 +122,8 @@ service cloud.firestore {
 
     match /academies/{academyId} {
       allow read: if isRoot() || isAcademyMember(academyId) || isAcademyOwner(academyId);
-      allow create, update, delete: if isRoot();
+      allow create, delete: if isRoot();
+      allow update: if isRoot() || canUpdateAcademyOperationalSettings(academyId);
     }
 
     match /academies/{academyId}/users/{uid} {

@@ -73,6 +73,12 @@ function sortStudents(items: Student[]) {
   });
 }
 
+function buildWhatsAppLink(phone: string) {
+  const normalizedPhone = phone.replace(/\D/g, "");
+  if (!normalizedPhone) return null;
+  return `https://wa.me/${normalizedPhone}`;
+}
+
 export function StudentsPage() {
   const { membership, canWriteAcademyData, isPreviewMode } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
@@ -315,7 +321,7 @@ export function StudentsPage() {
             disabled={!canWriteAcademyData || isPreviewMode}
             className="rounded-brand bg-primary px-3 py-2 text-xs font-semibold text-bg disabled:opacity-40"
           >
-            {isPreviewMode ? "Modo demo" : "Crear alumno"}
+            Crear alumno
           </button>
         }
       >
@@ -350,7 +356,7 @@ export function StudentsPage() {
               <div className="mt-3 grid gap-2 text-sm text-muted">
                 <MobileInfo label="Telefono" value={student.phone || "-"} />
                 <MobileInfo label="Contacto" value={student.emergencyContactName || "-"} />
-                <MobileInfo label="Telefono urgencia" value={student.contactPhone || "-"} />
+                <MobileInfo label="WhatsApp urgencia" value={student.contactPhone || "-"} href={buildWhatsAppLink(student.contactPhone)} />
                 <MobileInfo label="Alergias" value={student.allergies || "-"} />
               </div>
 
@@ -388,7 +394,20 @@ export function StudentsPage() {
                   <td className="px-3 py-3 text-muted">{student.email}</td>
                   <td className="px-3 py-3 text-muted">{student.phone || "-"}</td>
                   <td className="px-3 py-3 text-muted">{student.emergencyContactName || "-"}</td>
-                  <td className="px-3 py-3 text-muted">{student.contactPhone || "-"}</td>
+                  <td className="px-3 py-3 text-muted">
+                    {buildWhatsAppLink(student.contactPhone) ? (
+                      <a
+                        href={buildWhatsAppLink(student.contactPhone) ?? "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary underline-offset-2 hover:underline"
+                      >
+                        {student.contactPhone}
+                      </a>
+                    ) : (
+                      student.contactPhone || "-"
+                    )}
+                  </td>
                   <td className="max-w-[220px] px-3 py-3 text-muted">{student.allergies || "-"}</td>
                   <td className="px-3 py-3">
                     <button
@@ -555,7 +574,7 @@ export function StudentsPage() {
                   disabled={!canWriteAcademyData || isPreviewMode}
                   className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40"
                 >
-                  {isPreviewMode ? "Modo demo" : editingId ? "Guardar cambios" : "Crear alumno"}
+                  {editingId ? "Guardar cambios" : "Crear alumno"}
                 </button>
               </div>
             </form>
@@ -566,11 +585,17 @@ export function StudentsPage() {
   );
 }
 
-function MobileInfo({ label, value }: { label: string; value: string }) {
+function MobileInfo({ label, value, href }: { label: string; value: string; href?: string | null }) {
   return (
     <div className="grid gap-1">
       <p className="text-[11px] uppercase tracking-wide text-muted">{label}</p>
-      <p className="break-words text-text">{value}</p>
+      {href ? (
+        <a href={href} target="_blank" rel="noreferrer" className="break-words text-primary underline-offset-2 hover:underline">
+          {value}
+        </a>
+      ) : (
+        <p className="break-words text-text">{value}</p>
+      )}
     </div>
   );
 }

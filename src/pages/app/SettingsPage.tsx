@@ -1,48 +1,40 @@
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { collection, doc, getDoc, getDocs, serverTimestamp, updateDoc } from "firebase/firestore";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
 import { db } from "../../lib/firebase";
+import {
+  DEFAULT_ACADEMY_BILLING_SETTINGS,
+  normalizeAcademyBillingSettings,
+  type AcademyBillingSettings
+} from "../../lib/fees";
 import {
   DEFAULT_PLATFORM_CONFIG,
   getPlanDescription,
   getPlanHighlight,
   getPlanLabel,
-  getPlanPrice,
   getPlanLimit,
+  getPlanPrice,
   normalizePlatformConfig,
   type PlatformConfig
 } from "../../lib/plans";
 import { getTrialEndsAtMillis } from "../../lib/trial";
 import type { Academy, AcademyPlan } from "../../lib/types";
 
-type AcademySettings = Pick<Academy, "name" | "plan" | "status" | "planLimits" | "trial" | "createdAt">;
+type AcademySettings = Pick<Academy, "name" | "plan" | "status" | "planLimits" | "trial" | "createdAt" | "billingSettings">;
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
-
-const PLAN_FEATURES: Record<AcademyPlan, string[]> = {
-  basic: [
-    "Seguimiento centralizado de cuotas",
-    "Carga de alumnos y disciplinas",
-    "Vista simple para cobros del dia"
-  ],
-  pro: [
-    "Todo lo del Basico",
-    "Mayor capacidad para crecer",
-    "Mejor control operativo del centro"
-  ],
-  premium: [
-    "Todo lo del Pro",
-    "Capacidad alta o ilimitada",
-    "Preparado para operaciones mas grandes"
-  ]
-};
-
 const SUPPORT_PHONE = "5492657716071";
 
-function buildSupportLink(academyName: string, ownerName: string) {
-  const message = `Hola, soy ${ownerName} del centro ${academyName}. Necesito soporte tecnico.`;
-  return `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent(message)}`;
+const PLAN_FEATURES: Record<AcademyPlan, string[]> = {
+  basic: ["Seguimiento de alumnos y cuotas", "Base simple para empezar", "Operacion diaria liviana"],
+  pro: ["Mas capacidad operativa", "Orden para cobros y seguimiento", "Mejor margen para crecer"],
+  premium: ["Mayor amplitud de uso", "Escala para centros mas grandes", "Plan pensado para volumen"]
+};
+
+function buildSupportLink(academyName: string, ownerName: string, message: string) {
+  const text = `Hola, soy ${ownerName} del centro ${academyName}. ${message}`;
+  return `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent(text)}`;
 }
 
 function toMillis(value: unknown) {
@@ -100,34 +92,44 @@ function getTrialSummary(settings: AcademySettings, trialDurationDays: number) {
   };
 }
 
-function getPlanTone(plan: AcademyPlan, isCurrent: boolean) {
-  if (isCurrent) return "border-primary bg-primary/10";
-  if (plan === "premium") return "border-warning/40 bg-warning/5";
-  if (plan === "pro") return "border-secondary/40 bg-secondary/5";
-  return "border-slate-700 bg-surface";
+function getLateFeeLabel(settings: AcademyBillingSettings) {
+  if (!settings.lateFeeEnabled || settings.lateFeeValue <= 0) return "Sin recargo automatico";
+  const value = settings.lateFeeType === "percent" ? `${settings.lateFeeValue}%` : `$${settings.lateFeeValue}`;
+  return `${value} desde ${settings.lateFeeStartsAfterDays} dia${settings.lateFeeStartsAfterDays === 1 ? "" : "s"} de mora`;
 }
 
 export function SettingsPage() {
-  const { membership, profile, isPreviewMode } = useAuth();
+  const { membership, profile, isPreviewMode, canWriteAcademyData } = useAuth();
   const [settings, setSettings] = useState<AcademySettings | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
   const [studentsCount, setStudentsCount] = useState(0);
+  const [billingForm, setBillingForm] = useState<AcademyBillingSettings>(DEFAULT_ACADEMY_BILLING_SETTINGS);
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadSettings() {
       if (isPreviewMode) {
-        setSettings({
+        const previewSettings: AcademySettings = {
           name: "Centro Demo",
           plan: "pro",
           status: "active",
-          planLimits: {
-            maxStudents: 100
+          planLimits: { maxStudents: 100 },
+          billingSettings: {
+            defaultDueDay: 10,
+            lateFeeEnabled: true,
+            lateFeeStartsAfterDays: 3,
+            lateFeeType: "fixed",
+            lateFeeValue: 2500
           }
-        });
+        };
+        setSettings(previewSettings);
+        setBillingForm(normalizeAcademyBillingSettings(previewSettings.billingSettings));
         setStudentsCount(37);
         setPlatformConfig(DEFAULT_PLATFORM_CONFIG);
         return;
       }
+
       if (!membership) return;
       const academyPath = `academies/${membership.academyId}`;
       const [academySnap, configSnap, studentsSnap] = await Promise.all([
@@ -135,12 +137,16 @@ export function SettingsPage() {
         getDoc(doc(db, "platform", "config")),
         getDocs(collection(db, `${academyPath}/students`))
       ]);
+
       if (academySnap.exists()) {
-        setSettings(academySnap.data() as AcademySettings);
+        const nextSettings = academySnap.data() as AcademySettings;
+        setSettings(nextSettings);
+        setBillingForm(normalizeAcademyBillingSettings(nextSettings.billingSettings));
       }
       setStudentsCount(studentsSnap.size);
       setPlatformConfig(normalizePlatformConfig(configSnap.exists() ? configSnap.data() : undefined));
     }
+
     void loadSettings();
   }, [isPreviewMode, membership]);
 
@@ -161,112 +167,299 @@ export function SettingsPage() {
 
   const trialSummary = settings.status === "trial" ? getTrialSummary(settings, platformConfig.trialDurationDays) : null;
   const currentPlanPrice = getPlanPrice(platformConfig, settings.plan);
+  const supportBaseLink = buildSupportLink(
+    settings.name,
+    profile?.displayName ?? "Owner",
+    "Necesito ayuda con la configuracion del centro."
+  );
+
+  async function handleSaveBillingSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!membership || !canWriteAcademyData || isPreviewMode) return;
+
+    const normalizedSettings = normalizeAcademyBillingSettings(billingForm);
+    if (normalizedSettings.lateFeeEnabled && normalizedSettings.lateFeeValue <= 0) {
+      setSaveFeedback("Define un valor de recargo mayor a 0 para activarlo.");
+      window.setTimeout(() => setSaveFeedback(null), 2500);
+      return;
+    }
+
+    await updateDoc(doc(db, "academies", membership.academyId), {
+      billingSettings: normalizedSettings,
+      updatedAt: serverTimestamp()
+    });
+
+    setBillingForm(normalizedSettings);
+    setSettings((prev) => (prev ? { ...prev, billingSettings: normalizedSettings } : prev));
+    setSaveFeedback("Configuracion operativa guardada.");
+    window.setTimeout(() => setSaveFeedback(null), 2500);
+  }
 
   return (
-    <div className="grid gap-4">
-      <Panel title="Configuracion del centro">
-        <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-          <div className="grid gap-4">
-            <section className="rounded-brand border border-primary/30 bg-gradient-to-br from-primary/15 via-bg to-secondary/10 p-5 shadow-soft">
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.24em] text-primary">Centro activo</p>
-                  <h2 className="mt-2 font-display text-3xl text-text">{settings.name}</h2>
-                  <p className="mt-2 max-w-2xl text-sm text-muted">
-                    Tu panel de cuenta muestra plan, capacidad actual y el estado general del centro en un solo lugar.
-                  </p>
-                </div>
-                <div className="rounded-brand border border-slate-700/80 bg-slate-950/40 px-4 py-3">
-                  <p className="text-xs uppercase tracking-wide text-muted">Plan actual</p>
-                  <p className="mt-1 text-xl font-semibold text-primary">{getPlanLabel(platformConfig, settings.plan)}</p>
-                  <p className="mt-1 text-sm text-secondary">${currentPlanPrice}/mes</p>
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <InfoCard label="Capacidad" value={usage.limit === null ? "Ilimitada" : usage.usageLabel} accent="text-secondary" />
-                <InfoCard label="Plan activo" value={getPlanLabel(platformConfig, settings.plan)} accent="text-primary" />
-                <InfoCard label="Abono mensual" value={`$${currentPlanPrice}`} accent="text-secondary" />
-              </div>
-            </section>
-
-            <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="rounded-brand border border-slate-700 bg-bg p-4">
-                <p className="text-xs uppercase tracking-wide text-muted">Uso del plan</p>
-                <div className="mt-3 flex items-end justify-between gap-3">
+    <>
+      <div className="grid gap-4">
+        <Panel title="Configuracion del centro">
+          <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+            <div className="grid gap-4">
+              <section className="rounded-brand border border-primary/30 bg-gradient-to-br from-primary/15 via-bg to-secondary/10 p-5 shadow-soft">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                   <div>
-                    <p className="text-2xl font-semibold text-text">{usage.usageLabel}</p>
-                    <p className="mt-1 text-sm text-muted">
-                      {usage.limit === null
-                        ? "Tu plan no tiene limite de alumnos configurado."
-                        : "Esto te ayuda a entender cuanto margen real te queda para crecer."}
+                    <p className="text-xs uppercase tracking-[0.24em] text-primary">Centro activo</p>
+                    <h2 className="mt-2 font-display text-3xl text-text">{settings.name}</h2>
+                    <p className="mt-2 max-w-2xl text-sm text-muted">
+                      Define como quieres cobrar: dia general de vencimiento, recargos automaticos y reglas base del centro.
                     </p>
                   </div>
-                  {usage.limit !== null && (
-                    <p className={`text-sm font-semibold ${usage.usagePercent >= 85 ? "text-warning" : "text-secondary"}`}>
-                      {usage.usagePercent}% usado
-                    </p>
-                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsPlanModalOpen(true)}
+                      className="rounded-brand border border-primary/40 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/10"
+                    >
+                      Gestionar plan
+                    </button>
+                    <a
+                      href={supportBaseLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-brand border border-secondary/40 px-3 py-2 text-xs font-semibold text-secondary hover:bg-secondary/10"
+                    >
+                      Soporte
+                    </a>
+                  </div>
                 </div>
 
-                {usage.limit !== null ? (
-                  <div className="mt-4">
-                    <div className="h-3 overflow-hidden rounded-full bg-slate-800">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          usage.usagePercent >= 85 ? "bg-warning" : usage.usagePercent >= 60 ? "bg-primary" : "bg-secondary"
-                        }`}
-                        style={{ width: `${Math.max(8, usage.usagePercent)}%` }}
-                      />
-                    </div>
-                    <p className="mt-2 text-xs text-muted">
-                      {usage.limit - studentsCount > 0
-                        ? `Todavia puedes sumar ${usage.limit - studentsCount} alumnos antes de llegar al limite.`
-                        : "Estas en el limite actual del plan."}
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  <InfoCard label="Plan actual" value={getPlanLabel(platformConfig, settings.plan)} accent="text-primary" />
+                  <InfoCard label="Capacidad" value={usage.limit === null ? "Ilimitada" : usage.usageLabel} accent="text-secondary" />
+                  <InfoCard label="Recargo" value={getLateFeeLabel(billingForm)} accent="text-warning" />
+                </div>
+              </section>
+
+              <section className="rounded-brand border border-slate-700 bg-bg p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted">Reglas de cobro</p>
+                    <h3 className="mt-1 text-lg font-semibold text-text">Como funciona el centro al cobrar</h3>
+                    <p className="mt-1 max-w-2xl text-sm text-muted">
+                      Estas reglas se usan para definir vencimientos por defecto y calcular recargos automaticamente cuando una cuota sigue impaga.
                     </p>
                   </div>
-                ) : (
-                  <div className="mt-4 rounded-brand border border-secondary/30 bg-secondary/10 px-3 py-3 text-sm text-secondary">
-                    Tu capacidad es amplia para seguir creciendo sin preocuparte por el cupo.
-                  </div>
-                )}
-              </div>
+                  {saveFeedback && <span className="rounded-brand bg-secondary/15 px-3 py-2 text-xs font-semibold text-secondary">{saveFeedback}</span>}
+                </div>
 
+                <form onSubmit={(event) => void handleSaveBillingSettings(event)} className="mt-4 grid gap-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field
+                      label="Dia general de vencimiento"
+                      type="number"
+                      min={1}
+                      max={28}
+                      value={String(billingForm.defaultDueDay)}
+                      disabled={!canWriteAcademyData || isPreviewMode}
+                      onChange={(value) =>
+                        setBillingForm((prev) => ({
+                          ...prev,
+                          defaultDueDay: Math.min(28, Math.max(1, Number(value || prev.defaultDueDay)))
+                        }))
+                      }
+                    />
+                    <div className="rounded-brand border border-slate-700 bg-slate-950/30 p-3">
+                      <p className="text-xs uppercase tracking-wide text-muted">Vista previa</p>
+                      <p className="mt-2 text-sm text-text">
+                        Las cuotas mensuales nuevas venceran el dia <span className="font-semibold text-primary">{billingForm.defaultDueDay}</span> de cada mes.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-brand border border-slate-700 bg-slate-950/30 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-text">Recargo automatico</p>
+                        <p className="mt-1 text-sm text-muted">
+                          Si esta activo, el sistema suma el recargo solo cuando ya pasaron los dias de mora que definas aqui.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!canWriteAcademyData || isPreviewMode}
+                        onClick={() =>
+                          setBillingForm((prev) => {
+                            const nextEnabled = !prev.lateFeeEnabled;
+                            return {
+                              ...prev,
+                              lateFeeEnabled: nextEnabled,
+                              lateFeeValue:
+                                nextEnabled && prev.lateFeeValue <= 0
+                                  ? prev.lateFeeType === "percent"
+                                    ? 10
+                                    : 2500
+                                  : prev.lateFeeValue
+                            };
+                          })
+                        }
+                        className={`rounded-full px-3 py-2 text-xs font-semibold ${
+                          billingForm.lateFeeEnabled ? "bg-secondary/15 text-secondary" : "bg-slate-800 text-muted"
+                        } disabled:opacity-50`}
+                      >
+                        {billingForm.lateFeeEnabled ? "Activo" : "Desactivado"}
+                      </button>
+                    </div>
+
+                    {billingForm.lateFeeEnabled ? (
+                      <div className="mt-4 flex flex-wrap items-start gap-3">
+                        <div className="w-full max-w-[190px] rounded-brand border border-slate-700 bg-bg p-3">
+                          <Field
+                            label="Aplicar desde"
+                            type="number"
+                            min={1}
+                            value={String(billingForm.lateFeeStartsAfterDays)}
+                            disabled={!canWriteAcademyData || isPreviewMode}
+                            onChange={(value) =>
+                              setBillingForm((prev) => ({
+                                ...prev,
+                                lateFeeStartsAfterDays: Math.max(1, Number(value || prev.lateFeeStartsAfterDays))
+                              }))
+                            }
+                          />
+                          <p className="mt-2 text-xs text-muted">Dias de mora necesarios antes de sumar el recargo.</p>
+                        </div>
+
+                        <div className="w-full max-w-[220px] rounded-brand border border-slate-700 bg-bg p-3">
+                          <SelectField
+                            label="Tipo"
+                            value={billingForm.lateFeeType}
+                            disabled={!canWriteAcademyData || isPreviewMode}
+                            onChange={(value) =>
+                              setBillingForm((prev) => ({
+                                ...prev,
+                                lateFeeType: value === "percent" ? "percent" : "fixed",
+                                lateFeeValue:
+                                  prev.lateFeeValue <= 0
+                                    ? value === "percent"
+                                      ? 10
+                                      : 2500
+                                    : prev.lateFeeValue
+                              }))
+                            }
+                            options={[
+                              { value: "fixed", label: "Monto fijo" },
+                              { value: "percent", label: "Porcentaje" }
+                            ]}
+                          />
+                          <p className="mt-2 text-xs text-muted">Puedes cobrar un extra fijo o un porcentaje sobre la cuota.</p>
+                        </div>
+
+                        <div className="w-full max-w-[190px] rounded-brand border border-slate-700 bg-bg p-3">
+                          <Field
+                            label={billingForm.lateFeeType === "percent" ? "Valor extra (%)" : "Valor extra ($)"}
+                            type="number"
+                            min={1}
+                            value={billingForm.lateFeeValue > 0 ? String(billingForm.lateFeeValue) : ""}
+                            disabled={!canWriteAcademyData || isPreviewMode}
+                            onChange={(value) =>
+                              setBillingForm((prev) => ({
+                                ...prev,
+                                lateFeeValue: value === "" ? 0 : Math.max(0, Number(value || 0))
+                              }))
+                            }
+                          />
+                          <p className="mt-2 text-xs text-muted">Este campo es obligatorio mientras el recargo este activo.</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-brand border border-dashed border-slate-700 bg-bg px-4 py-3 text-sm text-muted">
+                        El recargo automatico esta desactivado. Activalo para definir desde cuando se aplica y cual sera el valor extra.
+                      </div>
+                    )}
+
+                    <p className="mt-3 text-xs text-muted">
+                      Ejemplo: si una cuota vence el dia 10 y configuras recargo desde 3 dias de mora, el adicional se aplica a partir del dia 13 si sigue impaga.
+                    </p>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      disabled={!canWriteAcademyData || isPreviewMode}
+                      className="rounded-brand bg-primary px-4 py-2 text-sm font-semibold text-bg disabled:opacity-50"
+                    >
+                      Guardar reglas de cobro
+                    </button>
+                  </div>
+                </form>
+              </section>
+            </div>
+
+            <aside className="grid gap-4">
               <div className="rounded-brand border border-slate-700 bg-bg p-4">
-                <p className="text-xs uppercase tracking-wide text-muted">Estado de cuenta</p>
+                <p className="text-xs uppercase tracking-wide text-muted">Resumen operativo</p>
                 <div className="mt-3 grid gap-3">
                   <SignalCard
-                    title="Plan contratado"
-                    detail={getPlanDescription(platformConfig, settings.plan)}
+                    title={`Plan ${getPlanLabel(platformConfig, settings.plan)}`}
+                    detail={`${getPlanDescription(platformConfig, settings.plan)} ${getPlanHighlight(platformConfig, settings.plan)}.`}
                     accent="text-primary"
                   />
                   <SignalCard
-                    title="Diferencial"
-                    detail={getPlanHighlight(platformConfig, settings.plan)}
+                    title="Capacidad actual"
+                    detail={
+                      usage.limit === null
+                        ? `Tienes ${studentsCount} alumnos y no hay limite configurado para tu plan.`
+                        : `Hoy tienes ${studentsCount} alumnos sobre un maximo de ${usage.limit}.`
+                    }
                     accent="text-secondary"
+                  />
+                  <SignalCard
+                    title="Reglas de cobro activas"
+                    detail={`Vencimiento general el dia ${billingForm.defaultDueDay}. ${getLateFeeLabel(billingForm)}.`}
+                    accent="text-warning"
                   />
                   {trialSummary ? (
                     <SignalCard title={trialSummary.title} detail={trialSummary.detail} accent={trialSummary.accent} />
                   ) : (
                     <SignalCard
-                      title="Centro listo para operar"
-                      detail="La configuracion principal del centro ya esta activa y disponible para el trabajo diario."
+                      title="Configuracion lista"
+                      detail="El centro ya tiene definidas sus reglas base para trabajar el dia a dia."
                       accent="text-secondary"
                     />
                   )}
                 </div>
               </div>
-            </section>
+            </aside>
           </div>
+        </Panel>
+      </div>
 
-          <aside className="rounded-brand border border-slate-700 bg-bg p-4">
-            <p className="text-xs uppercase tracking-wide text-muted">Planes disponibles</p>
+      {isPlanModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="plan-modal-title"
+            className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-brand border border-slate-700/80 bg-surface p-4 shadow-soft"
+          >
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 id="plan-modal-title" className="font-display text-lg text-text">
+                  Gestionar plan
+                </h2>
+                <p className="mt-1 text-xs text-muted">
+                  El cambio de plan se solicita aparte para no mezclar la configuracion operativa del centro con la parte comercial.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPlanModalOpen(false)}
+                className="rounded-brand border border-slate-600 px-2 py-1 text-xs text-muted hover:border-primary hover:text-primary"
+              >
+                Cerrar
+              </button>
+            </div>
 
-            <div className="mt-4 grid gap-3">
+            <div className="grid gap-3 md:grid-cols-3">
               {(["basic", "pro", "premium"] as const).map((plan) => {
                 const isCurrent = plan === settings.plan;
                 return (
-                  <div key={plan} className={`relative rounded-brand border p-4 transition ${getPlanTone(plan, isCurrent)}`}>
+                  <div key={plan} className={`rounded-brand border p-4 ${isCurrent ? "border-primary bg-primary/10" : "border-slate-700 bg-bg"}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className={`text-base font-semibold ${isCurrent ? "text-primary" : "text-text"}`}>
@@ -293,49 +486,30 @@ export function SettingsPage() {
                       ))}
                     </ul>
 
-                    <div className="mt-4 flex items-center justify-between gap-3">
-                      <span className="text-xs text-muted">
-                        {plan === "basic"
-                          ? "Para centros que arrancan"
-                          : plan === "pro"
-                            ? "Para crecer con mas orden"
-                            : "Para operar con amplitud"}
-                      </span>
-                      <button
-                        type="button"
-                        className={`rounded-brand px-3 py-2 text-xs font-semibold ${
-                          isCurrent
-                            ? "border border-primary/40 bg-primary/15 text-primary"
-                            : "bg-primary text-bg hover:brightness-110"
-                        }`}
-                      >
-                        {isCurrent ? "Plan actual" : "Solicitar cambio"}
-                      </button>
-                    </div>
+                    <a
+                      href={buildSupportLink(
+                        settings.name,
+                        profile?.displayName ?? "Owner",
+                        isCurrent
+                          ? `Quiero consultar detalles de mi plan actual ${getPlanLabel(platformConfig, plan)}.`
+                          : `Quiero solicitar el cambio al plan ${getPlanLabel(platformConfig, plan)}.`
+                      )}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={`mt-4 inline-flex w-full items-center justify-center rounded-brand px-3 py-2 text-xs font-semibold ${
+                        isCurrent ? "border border-primary/40 bg-primary/15 text-primary" : "bg-primary text-bg hover:brightness-110"
+                      }`}
+                    >
+                      {isCurrent ? "Consultar este plan" : "Solicitar cambio"}
+                    </a>
                   </div>
                 );
               })}
             </div>
-          </aside>
+          </div>
         </div>
-
-        {(settings.plan === "pro" || settings.plan === "premium") && (
-          <a
-            href={buildSupportLink(
-              settings.name,
-              profile?.displayName ?? "Owner"
-            )}
-            target="_blank"
-            rel="noreferrer"
-            aria-label="Abrir soporte tecnico por WhatsApp"
-            className="fixed bottom-6 right-6 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full border border-secondary/40 bg-secondary text-slate-950 shadow-soft transition hover:scale-105 hover:brightness-110"
-            title="Soporte tecnico por WhatsApp"
-          >
-            <WhatsAppIcon />
-          </a>
-        )}
-      </Panel>
-    </div>
+      )}
+    </>
   );
 }
 
@@ -373,10 +547,67 @@ function SignalCard({
   );
 }
 
-function WhatsAppIcon() {
+function Field({
+  label,
+  value,
+  onChange,
+  type = "text",
+  min,
+  max,
+  disabled = false
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  min?: number;
+  max?: number;
+  disabled?: boolean;
+}) {
   return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current" aria-hidden="true">
-      <path d="M19.05 4.94A9.9 9.9 0 0 0 12.03 2C6.56 2 2.1 6.46 2.1 11.93c0 1.75.46 3.47 1.34 4.98L2 22l5.24-1.37a9.92 9.92 0 0 0 4.78 1.22h.01c5.47 0 9.93-4.46 9.93-9.93a9.86 9.86 0 0 0-2.91-6.98Zm-7.02 15.23h-.01a8.3 8.3 0 0 1-4.22-1.15l-.3-.18-3.11.82.83-3.03-.2-.31a8.23 8.23 0 0 1-1.27-4.39c0-4.56 3.71-8.27 8.28-8.27 2.2 0 4.27.85 5.83 2.42a8.2 8.2 0 0 1 2.42 5.84c0 4.56-3.71 8.25-8.25 8.25Zm4.54-6.19c-.25-.13-1.47-.72-1.7-.8-.23-.09-.39-.13-.56.12-.16.25-.64.79-.78.95-.14.17-.29.19-.54.06-.25-.12-1.04-.38-1.98-1.22-.73-.65-1.22-1.46-1.36-1.71-.14-.25-.01-.38.11-.51.11-.11.25-.29.37-.43.12-.15.16-.25.25-.42.08-.17.04-.31-.02-.43-.06-.13-.56-1.35-.77-1.84-.2-.49-.4-.42-.56-.42h-.48c-.17 0-.43.06-.65.31-.23.25-.87.85-.87 2.07 0 1.22.9 2.39 1.02 2.56.12.17 1.76 2.68 4.25 3.76.59.26 1.06.42 1.42.54.6.19 1.14.16 1.57.1.48-.07 1.47-.6 1.68-1.17.21-.58.21-1.07.15-1.17-.06-.1-.22-.16-.46-.29Z" />
-    </svg>
+    <label className="grid min-w-0 gap-1">
+      <span>{label}</span>
+      <input
+        type={type}
+        min={min}
+        max={max}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="block w-full min-w-0 rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary disabled:opacity-50"
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  disabled = false
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="grid min-w-0 gap-1">
+      <span>{label}</span>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="block w-full min-w-0 rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary disabled:opacity-50"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

@@ -1,11 +1,22 @@
-import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, orderBy, query } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
 import { formatMembershipStatus } from "../../lib/display";
 import { db } from "../../lib/firebase";
-import { diffDays, getFeeBalance, normalizePaidAmount, resolveFeeStatus, type FeeStatus } from "../../lib/fees";
+import {
+  applyBillingSettingsToFee,
+  compareFeePriority,
+  DEFAULT_ACADEMY_BILLING_SETTINGS,
+  diffDays,
+  getDaysOverdue,
+  getFeeBalance,
+  normalizeAcademyBillingSettings,
+  normalizePaidAmount,
+  resolveFeeStatus,
+  type FeeStatus
+} from "../../lib/fees";
 
 interface Student {
   id: string;
@@ -71,7 +82,7 @@ export function DebtPage() {
         setFees([
           {
             id: "fee-1",
-            ...normalizeFee({
+            ...applyBillingSettingsToFee(normalizeFee({
               studentId: "student-1",
               concept: "Cuota mensual 03/2026 - Freestyle",
               period: "2026-03",
@@ -79,11 +90,17 @@ export function DebtPage() {
               paidAmount: 2000,
               dueDate: "2026-03-05",
               disciplineName: "Freestyle"
+            }), {
+              defaultDueDay: 10,
+              lateFeeEnabled: true,
+              lateFeeStartsAfterDays: 3,
+              lateFeeType: "fixed",
+              lateFeeValue: 2500
             })
           },
           {
             id: "fee-2",
-            ...normalizeFee({
+            ...applyBillingSettingsToFee(normalizeFee({
               studentId: "student-2",
               concept: "Cuota mensual 03/2026 - Breaking",
               period: "2026-03",
@@ -91,16 +108,18 @@ export function DebtPage() {
               paidAmount: 15000,
               dueDate: "2026-03-09",
               disciplineName: "Breaking"
-            })
+            }), DEFAULT_ACADEMY_BILLING_SETTINGS)
           }
         ]);
         return;
       }
       if (!academyPath) return;
-      const [studentsSnap, feesSnap] = await Promise.all([
+      const [academySnap, studentsSnap, feesSnap] = await Promise.all([
+        getDoc(doc(db, "academies", membership!.academyId)),
         getDocs(query(collection(db, `${academyPath}/students`), orderBy("fullName", "asc"))),
         getDocs(query(collection(db, `${academyPath}/fees`), orderBy("dueDate", "asc")))
       ]);
+      const nextBillingSettings = normalizeAcademyBillingSettings(academySnap.exists() ? academySnap.data().billingSettings : undefined);
       setStudents(
         studentsSnap.docs.map((docSnap) => ({
           id: docSnap.id,
@@ -110,10 +129,13 @@ export function DebtPage() {
         }))
       );
       setFees(
-        feesSnap.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...normalizeFee(docSnap.data() as Omit<Fee, "id">)
-        }))
+        feesSnap.docs.map((docSnap) => {
+          const normalizedFee = normalizeFee(docSnap.data() as Omit<Fee, "id">);
+          return {
+            id: docSnap.id,
+            ...applyBillingSettingsToFee(normalizedFee, nextBillingSettings)
+          };
+        })
       );
     }
     void load();
@@ -128,6 +150,7 @@ export function DebtPage() {
       .map((fee) => {
         const student = activeStudents.find((item) => item.id === fee.studentId);
         const daysLeft = diffDays(fee.dueDate);
+        const daysOverdue = getDaysOverdue(fee.dueDate);
         const whatsappUrl =
           fee.balance > 0 && student
             ? buildWhatsAppLink(student.fullName, student.contactPhone, fee.disciplineName ?? fee.concept ?? "la cuota", fee.balance)
@@ -138,22 +161,12 @@ export function DebtPage() {
           studentName: student?.fullName ?? fee.studentId,
           phone: student?.contactPhone ?? "",
           daysLeft,
+          daysOverdue,
           whatsappUrl
         };
       })
       .filter((fee) => fee.daysLeft <= 15)
-      .sort((a, b) => {
-        const aIsDebt = a.balance > 0;
-        const bIsDebt = b.balance > 0;
-        const aIsOverdueDebt = a.daysLeft < 0 && aIsDebt;
-        const bIsOverdueDebt = b.daysLeft < 0 && bIsDebt;
-        const aIsUpcomingDebt = a.daysLeft >= 0 && aIsDebt;
-        const bIsUpcomingDebt = b.daysLeft >= 0 && bIsDebt;
-
-        if (aIsOverdueDebt !== bIsOverdueDebt) return aIsOverdueDebt ? -1 : 1;
-        if (aIsUpcomingDebt !== bIsUpcomingDebt) return aIsUpcomingDebt ? -1 : 1;
-        return a.daysLeft - b.daysLeft;
-      });
+      .sort((a, b) => compareFeePriority(a, b) || a.studentName.localeCompare(b.studentName, "es", { sensitivity: "base" }));
   }, [fees, activeStudentIds, activeStudents]);
 
   const totals = useMemo(() => {
@@ -179,7 +192,7 @@ export function DebtPage() {
       <div className="mb-4 rounded-brand border border-warning/30 bg-warning/10 p-4 text-sm">
         <p className="font-semibold text-text">Aqui ves lo que ya vencio y lo que esta por vencer dentro de los proximos 15 dias.</p>
         <p className="mt-1 text-muted">
-          El orden prioriza primero las cuotas mas vencidas con saldo, luego las proximas a vencer y al final las que ya estan pagadas.
+          El orden prioriza primero las cuotas con mas dias de mora y saldo, luego las proximas a vencer y al final las que ya no deben nada.
         </p>
       </div>
 
@@ -209,7 +222,7 @@ export function DebtPage() {
             {trackingRows.map((row) => (
               <tr key={row.id} className="border-t border-slate-800">
                 <td className="px-3 py-3">
-                  <PriorityBadge daysLeft={row.daysLeft} />
+                  <PriorityBadge daysLeft={row.daysLeft} daysOverdue={row.daysOverdue} />
                 </td>
                 <td className="px-3 py-3">{row.studentName}</td>
                 <td className="px-3 py-3 text-muted">{row.disciplineName ?? row.concept ?? "Cuota"}</td>
@@ -272,9 +285,9 @@ function Summary({ label, value, color }: { label: string; value: number | strin
   );
 }
 
-function PriorityBadge({ daysLeft }: { daysLeft: number }) {
-  if (daysLeft < 0) {
-    return <span className="rounded-brand bg-danger/15 px-2 py-1 text-xs font-semibold text-danger">Vencida</span>;
+function PriorityBadge({ daysLeft, daysOverdue }: { daysLeft: number; daysOverdue: number }) {
+  if (daysOverdue > 0) {
+    return <span className="rounded-brand bg-danger/15 px-2 py-1 text-xs font-semibold text-danger">{daysOverdue} dia{daysOverdue === 1 ? "" : "s"} de mora</span>;
   }
   if (daysLeft === 0) {
     return <span className="rounded-brand bg-danger/15 px-2 py-1 text-xs font-semibold text-danger">Vence hoy</span>;
