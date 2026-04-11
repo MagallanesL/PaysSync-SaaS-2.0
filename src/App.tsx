@@ -8,6 +8,14 @@ const LoginPage = lazy(async () => {
   const module = await import("./pages/LoginPage");
   return { default: module.LoginPage };
 });
+const RegisterAcademyPage = lazy(async () => {
+  const module = await import("./pages/RegisterAcademyPage");
+  return { default: module.RegisterAcademyPage };
+});
+const MarketingLandingPage = lazy(async () => {
+  const module = await import("./pages/MarketingLandingPage");
+  return { default: module.MarketingLandingPage };
+});
 const NoMembershipPage = lazy(async () => {
   const module = await import("./pages/NoMembershipPage");
   return { default: module.NoMembershipPage };
@@ -44,7 +52,7 @@ const SettingsPage = lazy(async () => {
 function IndexRedirect() {
   const { loading, firebaseUser, isRoot, membership } = useAuth();
   if (loading) return null;
-  if (!firebaseUser) return <Navigate to="/login" replace />;
+  if (!firebaseUser) return <MarketingLandingPage />;
   if (isRoot) return <Navigate to="/root/dashboard" replace />;
   if (membership) return <Navigate to="/app/dashboard" replace />;
   return <Navigate to="/no-membership" replace />;
@@ -56,6 +64,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<IndexRedirect />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterAcademyPage />} />
         <Route path="/root" element={<Navigate to="/root/dashboard" replace />} />
         <Route
           path="/no-membership"

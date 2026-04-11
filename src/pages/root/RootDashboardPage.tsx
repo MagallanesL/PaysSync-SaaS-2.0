@@ -15,11 +15,12 @@ import {
   updateDoc,
   writeBatch
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Panel } from "../../components/ui/Panel";
 import { formatAcademyRole, formatMembershipStatus } from "../../lib/display";
-import { db, getSecondaryAuth } from "../../lib/firebase";
+import { db, functions, getSecondaryAuth } from "../../lib/firebase";
 import {
   DEFAULT_PLATFORM_CONFIG,
   getPlanLabel,
@@ -194,6 +195,14 @@ function formatPeriod(period?: string) {
   return new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric" }).format(date);
 }
 
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0
+  }).format(value);
+}
+
 function getCurrentPeriod() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -343,6 +352,7 @@ export function RootDashboardPage() {
   const [configError, setConfigError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<RootSection>("billing");
   const [activePlanSection, setActivePlanSection] = useState<ConfigPlanSection>("basic");
+  const [deletingAcademyId, setDeletingAcademyId] = useState<string | null>(null);
 
   async function loadPlatformConfig() {
     const configSnap = await getDoc(doc(db, "platform", "config"));
@@ -418,6 +428,52 @@ export function RootDashboardPage() {
       .filter((academy) => academy.status === "active")
       .reduce((sum, academy) => sum + getPlanPrice(platformConfig, academy.plan), 0);
     return { total, trials, active, suspended, mrr };
+  }, [academies, platformConfig]);
+
+  const billingSnapshot = useMemo(() => {
+    const rows = academies.map((academy) => {
+      const billing = resolveBillingStatus(academy);
+      const amount = getPlanPrice(platformConfig, academy.plan);
+      const subscriptionDates = resolveSubscriptionDates(academy);
+      const dueMillis = subscriptionDates.renewsAt?.getTime() ?? null;
+      const daysUntilDue =
+        dueMillis === null ? null : Math.ceil((dueMillis - Date.now()) / DAY_IN_MS);
+
+      return {
+        academy,
+        billing,
+        amount,
+        subscriptionDates,
+        dueMillis,
+        daysUntilDue
+      };
+    });
+
+    const overdue = rows.filter((row) => row.billing.status === "overdue");
+    const pending = rows.filter((row) => row.billing.status === "pending");
+    const paid = rows.filter((row) => row.billing.status === "paid");
+    const dueSoon = rows.filter(
+      (row) => row.billing.status === "pending" && row.daysUntilDue !== null && row.daysUntilDue >= 0 && row.daysUntilDue <= 7
+    );
+    const riskAmount = rows
+      .filter((row) => row.billing.status === "overdue" || row.billing.status === "pending")
+      .reduce((sum, row) => sum + row.amount, 0);
+
+    const sortedRows = [...rows].sort((left, right) => {
+      const priority = { overdue: 0, pending: 1, paid: 2, trial: 3, suspended: 4 } as const;
+      const byStatus = priority[left.billing.status] - priority[right.billing.status];
+      if (byStatus !== 0) return byStatus;
+      return (left.dueMillis ?? Number.MAX_SAFE_INTEGER) - (right.dueMillis ?? Number.MAX_SAFE_INTEGER);
+    });
+
+    return {
+      rows: sortedRows,
+      overdueCount: overdue.length,
+      pendingCount: pending.length,
+      paidCount: paid.length,
+      dueSoonCount: dueSoon.length,
+      riskAmount
+    };
   }, [academies, platformConfig]);
 
   const planBreakdown = useMemo(() => {
@@ -579,6 +635,35 @@ export function RootDashboardPage() {
     await loadAcademies();
   }
 
+  async function handleDeleteAcademy(academy: Academy) {
+    const confirmation = window.prompt(
+      `Vas a eliminar el centro "${academy.name}". Esta accion borra el centro y sus datos asociados.\n\nPara confirmar, escribe ELIMINAR`
+    );
+
+    if (confirmation !== "ELIMINAR") {
+      return;
+    }
+
+    setDeletingAcademyId(academy.id);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const deleteAcademyCallable = httpsCallable<{ academyId: string }, { academyId: string }>(functions, "deleteAcademy");
+      await deleteAcademyCallable({ academyId: academy.id });
+      if (editState?.id === academy.id) {
+        setEditState(null);
+        setActiveSection("billing");
+      }
+      setMessage(`Centro "${academy.name}" eliminado correctamente.`);
+      await loadAcademies();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo eliminar el centro.");
+    } finally {
+      setDeletingAcademyId(null);
+    }
+  }
+
   async function handleSaveEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editState) return;
@@ -725,18 +810,19 @@ export function RootDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-bg px-4 py-4 text-text md:px-6">
-      <div className="mx-auto max-w-7xl space-y-4">
-        <header className="rounded-brand border border-slate-700/80 bg-surface px-5 py-4 shadow-soft">
+    <div className="min-h-screen bg-[#0B0B0B] px-4 py-4 text-text md:px-6">
+      <div className="mx-auto max-w-7xl space-y-5">
+        <header className="rounded-brand border border-[#262626] bg-[#1A1A1A] px-5 py-5 shadow-soft">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="font-display text-2xl text-primary">Panel raiz PaySync</p>
-              <p className="text-sm text-muted">
-                {profile?.displayName} | <span className="uppercase text-primary">ROOT</span>
+              <p className="font-display text-2xl text-primary">Panel de control PaySync</p>
+              <p className="mt-1 text-sm text-[#B3B3B3]">Estado general de tu negocio en tiempo real</p>
+              <p className="mt-2 text-xs uppercase tracking-[0.24em] text-[#00D1FF]">
+                {profile?.displayName} | ROOT
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <div className="flex flex-wrap gap-2 rounded-brand border border-slate-700 bg-bg p-2">
+              <div className="flex flex-wrap gap-2 rounded-brand border border-[#262626] bg-[#0B0B0B] p-2">
                 <SectionTab
                   label="Facturacion"
                   active={activeSection === "billing"}
@@ -757,7 +843,7 @@ export function RootDashboardPage() {
               <button
                 type="button"
                 onClick={openCreateModal}
-                className="rounded-brand bg-primary px-3 py-2 text-xs font-semibold text-bg"
+                className="rounded-brand border border-[#00D1FF]/40 bg-[#00D1FF]/10 px-4 py-2 text-xs font-semibold text-[#00D1FF] shadow-[0_0_24px_rgba(0,209,255,0.16)] transition hover:border-[#00D1FF] hover:bg-[#00D1FF]/15"
               >
                 Crear centro
               </button>
@@ -771,159 +857,238 @@ export function RootDashboardPage() {
           </div>
         </header>
 
-        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <KpiCard label="Centros" value={kpis.total} color="text-primary" />
-          <KpiCard label="Pruebas" value={kpis.trials} color="text-warning" />
-          <KpiCard label="Activas" value={kpis.active} color="text-secondary" />
-          <KpiCard label="Suspendidas" value={kpis.suspended} color="text-danger" />
-          <KpiCard label="MRR estimado" value={`$${kpis.mrr}`} color="text-text" />
+        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <KpiCard
+            label="Ingresos mensuales"
+            value={formatCurrency(kpis.mrr)}
+            color="text-white"
+            helper="(+0% este mes)"
+            accent="border-[#00D1FF]/30 shadow-[0_0_24px_rgba(0,209,255,0.08)]"
+          />
+          <KpiCard label="Centros activos" value={kpis.active} color="text-[#00C896]" helper="Facturando este ciclo" />
+          <KpiCard label="En prueba" value={kpis.trials} color="text-[#F5A524]" helper="Todavia no abonan plan" />
+          <KpiCard label="Suspendidos" value={kpis.suspended} color="text-[#FF4D4F]" helper="Requieren revision" />
+          <KpiCard
+            label="Ingresos en riesgo"
+            value={formatCurrency(billingSnapshot.riskAmount)}
+            color="text-[#FF4D4F]"
+            helper="Pendientes o vencidos"
+          />
         </section>
 
         <Panel title="Centro de control">
           {activeSection === "billing" && (
-            <div className="grid gap-4">
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-5">
+              <div className="rounded-brand border border-[#262626] bg-[#121212] p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#00D1FF]">Atencion requerida</p>
+                    <h2 className="mt-2 text-xl font-semibold text-white">Resumen de accion inmediata</h2>
+                  </div>
+                  <span
+                    className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                      billingSnapshot.overdueCount || billingSnapshot.dueSoonCount || billingSnapshot.riskAmount
+                        ? "border-[#F5A524]/30 bg-[#F5A524]/10 text-[#F5A524]"
+                        : "border-[#00C896]/30 bg-[#00C896]/10 text-[#00C896]"
+                    }`}
+                  >
+                    {billingSnapshot.overdueCount || billingSnapshot.dueSoonCount || billingSnapshot.riskAmount ? "Revisar hoy" : "Todo en orden"}
+                  </span>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <AlertCard
+                    tone={billingSnapshot.overdueCount > 0 ? "danger" : "success"}
+                    title={billingSnapshot.overdueCount > 0 ? `${billingSnapshot.overdueCount} centro${billingSnapshot.overdueCount === 1 ? "" : "s"} vencido${billingSnapshot.overdueCount === 1 ? "" : "s"}` : "Sin centros vencidos"}
+                    detail={billingSnapshot.overdueCount > 0 ? "Cobro atrasado que requiere seguimiento." : "No hay deuda vencida en este momento."}
+                  />
+                  <AlertCard
+                    tone={billingSnapshot.dueSoonCount > 0 ? "warning" : "success"}
+                    title={billingSnapshot.dueSoonCount > 0 ? `${billingSnapshot.dueSoonCount} centro${billingSnapshot.dueSoonCount === 1 ? "" : "s"} por vencer esta semana` : "Sin vencimientos inmediatos"}
+                    detail={billingSnapshot.dueSoonCount > 0 ? "Proximo vencimiento dentro de 7 dias." : "No hay alertas cercanas para esta semana."}
+                  />
+                  <AlertCard
+                    tone={billingSnapshot.riskAmount > 0 ? "danger" : "success"}
+                    title={billingSnapshot.riskAmount > 0 ? `${formatCurrency(billingSnapshot.riskAmount)} en riesgo de cobro` : "Todo en orden"}
+                    detail={billingSnapshot.riskAmount > 0 ? "Suma de centros pendientes y vencidos." : "No hay ingresos comprometidos ahora mismo."}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
                 <MetricInline
-                  label="Pagados"
-                  value={academies.filter((academy) => resolveBillingStatus(academy).status === "paid").length}
+                  label="Vencidos"
+                  value={billingSnapshot.overdueCount}
+                  tone="danger"
+                  helper="Centros con cobro vencido"
                 />
                 <MetricInline
                   label="Pendientes"
-                  value={academies.filter((academy) => resolveBillingStatus(academy).status === "pending").length}
+                  value={billingSnapshot.pendingCount}
+                  tone="warning"
+                  helper="Proximo vencimiento"
                 />
                 <MetricInline
-                  label="Vencidos"
-                  value={academies.filter((academy) => resolveBillingStatus(academy).status === "overdue").length}
+                  label="Pagados"
+                  value={billingSnapshot.paidCount}
+                  tone="success"
+                  helper="Pagado este ciclo"
                 />
               </div>
 
-              <div className="overflow-x-auto rounded-brand border border-slate-700 bg-bg">
-                <table className="root-centers-table min-w-full text-sm">
-                  <thead className="text-left text-muted">
-                    <tr>
-                      <th className="px-4 py-3">Centro</th>
-                      <th className="px-4 py-3">Plan comprado</th>
-                      <th className="px-4 py-3">Estado de cobro</th>
-                      <th className="px-4 py-3">Vencimiento</th>
-                      <th className="px-4 py-3">Responsable</th>
-                      <th className="px-4 py-3">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {academies.map((academy) => {
-                      const billing = resolveBillingStatus(academy);
-                      const amount = getPlanPrice(platformConfig, academy.plan);
-                      const planLabel = getPlanLabel(platformConfig, academy.plan);
-                      const whatsappUrl = buildOwnerWhatsAppLink(academy, amount);
-                      const mailUrl = buildOwnerMailLink(academy, amount, planLabel);
-                      const subscriptionDates = resolveSubscriptionDates(academy);
+              <div className="rounded-brand border border-[#262626] bg-[#121212] p-4">
+                <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#00D1FF]">Centros</p>
+                    <h3 className="mt-2 text-xl font-semibold text-white">Vista operativa de cobro</h3>
+                    <p className="mt-1 text-sm text-[#B3B3B3]">Prioriza vencidos, revisa proximos vencimientos y actua rapido.</p>
+                  </div>
+                </div>
 
-                      return (
-                        <tr key={`billing-${academy.id}`} className="border-t border-slate-800 align-top">
-                          <td className="px-4 py-4">
-                            <div className="grid gap-1">
-                              <p className="font-semibold text-text">{academy.name}</p>
-                              <p className="text-xs text-muted">{academy.slug}</p>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="grid gap-1">
-                              <p className="font-semibold text-text">{planLabel}</p>
-                              <p className="text-xs text-secondary">${amount}/mes</p>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="grid gap-1">
-                              <Badge
-                                tone={
-                                  billing.tone === "success"
-                                    ? "success"
-                                    : billing.tone === "danger"
-                                      ? "danger"
-                                      : "warning"
-                                }
-                              >
-                                {billing.label}
-                              </Badge>
-                              <p className="text-xs text-muted">{billing.detail}</p>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="grid gap-1">
-                              <p className="text-sm text-text">
-                                {academy.status === "active" ? formatDate(subscriptionDates.renewsAt) : "-"}
-                              </p>
-                              <p className="text-xs text-muted">
-                                {academy.status === "active"
-                                  ? `Ciclo: ${formatPeriod(
-                                      academy.subscription?.currentPeriod ??
-                                        (subscriptionDates.startedAt
-                                          ? getCurrentPeriodFromDate(subscriptionDates.startedAt)
-                                          : getCurrentPeriod())
-                                    )}`
-                                  : "Sin abono activo"}
-                              </p>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="grid gap-1">
-                              <p className="text-sm text-text">{academy.owner?.name || "Sin nombre"}</p>
-                              <p className="text-xs text-muted">{academy.owner?.email}</p>
-                              <p className="text-xs text-muted">{academy.owner?.phone || "Sin WhatsApp"}</p>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="flex flex-wrap gap-2">
-                              <select
-                                value={
-                                  billing.status === "trial" || billing.status === "suspended"
-                                    ? ""
-                                    : billing.status
-                                }
-                                onChange={(event) =>
-                                  void handleUpdateBillingStatus(
-                                    academy,
-                                    event.target.value as "paid" | "pending" | "overdue"
-                                  )
-                                }
-                                disabled={billing.status === "trial" || billing.status === "suspended"}
-                                className="rounded-brand border border-slate-600 bg-surface px-3 py-2 text-xs font-semibold text-text outline-none focus:border-primary disabled:opacity-40"
-                              >
-                                <option value="" disabled>
-                                  Estado de cobro
-                                </option>
-                                <option value="paid">Pagado</option>
-                                <option value="pending">Pendiente</option>
-                                <option value="overdue">Vencido</option>
-                              </select>
-                              <a
-                                href={mailUrl}
-                                className="rounded-brand border border-slate-600 px-3 py-2 text-xs font-semibold text-muted hover:border-primary hover:text-primary"
-                              >
-                                Mail
-                              </a>
-                              {whatsappUrl && (
-                                <a
-                                  href={whatsappUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="rounded-brand border border-secondary/40 px-3 py-2 text-xs font-semibold text-secondary hover:bg-secondary/10"
-                                >
-                                  WhatsApp
-                                </a>
-                              )}
-                            </div>
+                <div className="overflow-x-auto rounded-brand border border-[#262626] bg-[#0B0B0B]">
+                  <table className="root-centers-table min-w-full text-sm">
+                    <thead className="text-left text-muted">
+                      <tr>
+                        <th className="px-4 py-3">Centro</th>
+                        <th className="px-4 py-3">Estado</th>
+                        <th className="px-4 py-3">Vencimiento</th>
+                        <th className="px-4 py-3">Monto mensual</th>
+                        <th className="px-4 py-3">Responsable</th>
+                        <th className="px-4 py-3">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {loading ? (
+                        <tr>
+                          <td className="px-4 py-6 text-muted" colSpan={6}>
+                            Cargando...
                           </td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      ) : billingSnapshot.rows.length === 0 ? (
+                        <tr>
+                          <td className="px-4 py-6 text-muted" colSpan={6}>
+                            No hay centros todavia.
+                          </td>
+                        </tr>
+                      ) : (
+                        billingSnapshot.rows.map(({ academy, billing, amount, subscriptionDates, daysUntilDue }) => {
+                          const planLabel = getPlanLabel(platformConfig, academy.plan);
+                          const whatsappUrl = buildOwnerWhatsAppLink(academy, amount);
+                          const mailUrl = buildOwnerMailLink(academy, amount, planLabel);
+                          const dueTone =
+                            billing.status === "overdue"
+                              ? "text-[#FF4D4F]"
+                              : billing.status === "pending" && daysUntilDue !== null && daysUntilDue <= 3
+                                ? "text-[#F5A524]"
+                                : billing.status === "paid"
+                                  ? "text-[#00C896]"
+                                  : "text-white";
+
+                          return (
+                            <tr key={`billing-${academy.id}`} className="border-t border-slate-800 align-top">
+                              <td className="px-4 py-4">
+                                <div className="grid gap-1">
+                                  <p className="font-semibold text-text">{academy.name}</p>
+                                  <p className="text-xs text-muted">{planLabel} | {academy.slug}</p>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4">
+                                <div className="grid gap-1">
+                                  <Badge
+                                    tone={
+                                      billing.tone === "success"
+                                        ? "success"
+                                        : billing.tone === "danger"
+                                          ? "danger"
+                                          : "warning"
+                                    }
+                                  >
+                                    {billing.label}
+                                  </Badge>
+                                  <p className="text-xs text-muted">{billing.detail}</p>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4">
+                                <div className="grid gap-1">
+                                  <p className={`text-sm font-semibold ${dueTone}`}>
+                                    {academy.status === "active" ? formatDate(subscriptionDates.renewsAt) : "-"}
+                                  </p>
+                                  <p className="text-xs text-muted">
+                                    {academy.status === "active"
+                                      ? `Ciclo: ${formatPeriod(
+                                          academy.subscription?.currentPeriod ??
+                                            (subscriptionDates.startedAt
+                                              ? getCurrentPeriodFromDate(subscriptionDates.startedAt)
+                                              : getCurrentPeriod())
+                                        )}`
+                                      : "Sin abono activo"}
+                                  </p>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4">
+                                <div className="grid gap-1">
+                                  <p className="text-base font-semibold text-[#00C896]">{formatCurrency(amount)}</p>
+                                  <p className="text-xs text-muted">Ingreso mensual del centro</p>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4">
+                                <div className="grid gap-1">
+                                  <p className="text-sm text-text">{academy.owner?.name || "Sin nombre"}</p>
+                                  <p className="text-[11px] uppercase tracking-wide text-muted">Responsable del centro</p>
+                                  <p className="text-xs text-muted">{academy.owner?.email}</p>
+                                  <p className="text-xs text-muted">{academy.owner?.phone || "Sin WhatsApp"}</p>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4">
+                                <div className="flex flex-wrap gap-2">
+                                  <select
+                                    value={billing.status === "trial" || billing.status === "suspended" ? "" : billing.status}
+                                    onChange={(event) =>
+                                      void handleUpdateBillingStatus(
+                                        academy,
+                                        event.target.value as "paid" | "pending" | "overdue"
+                                      )
+                                    }
+                                    disabled={billing.status === "trial" || billing.status === "suspended"}
+                                    className="rounded-brand border border-slate-600 bg-surface px-3 py-2 text-xs font-semibold text-text outline-none focus:border-primary disabled:opacity-40"
+                                  >
+                                    <option value="" disabled>
+                                      Estado de cobro
+                                    </option>
+                                    <option value="paid">Pagado</option>
+                                    <option value="pending">Pendiente</option>
+                                    <option value="overdue">Vencido</option>
+                                  </select>
+                                  <a
+                                    href={mailUrl}
+                                    className="rounded-brand border border-slate-600 px-3 py-2 text-xs font-semibold text-muted hover:border-primary hover:text-primary"
+                                  >
+                                    Enviar recordatorio
+                                  </a>
+                                  {whatsappUrl && (
+                                    <a
+                                      href={whatsappUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="rounded-brand border border-secondary/40 px-3 py-2 text-xs font-semibold text-secondary hover:bg-secondary/10"
+                                    >
+                                      WhatsApp
+                                    </a>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               <div className="grid gap-3 md:grid-cols-3">
                 {planBreakdown.map((item) => (
-                  <div key={item.plan} className="rounded-brand border border-slate-700 bg-bg p-4">
+                  <div key={item.plan} className="rounded-brand border border-[#262626] bg-[#121212] p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold text-text">{getPlanLabel(platformConfig, item.plan)}</p>
@@ -1118,14 +1283,18 @@ export function RootDashboardPage() {
         <div className="grid gap-4">
           <Panel title="Centros">
             <div className="mb-4 grid gap-3 rounded-brand border border-slate-700 bg-bg p-4 sm:grid-cols-3">
-              <MetricInline label="Total" value={academies.length} />
+              <MetricInline label="Total" value={academies.length} tone="success" helper="Base total de centros" />
               <MetricInline
                 label="En prueba"
                 value={academies.filter((academy) => academy.status === "trial").length}
+                tone="warning"
+                helper="Todavia no facturan"
               />
               <MetricInline
                 label="Suspendidos"
                 value={academies.filter((academy) => academy.status === "suspended").length}
+                tone="danger"
+                helper="Sin acceso habilitado"
               />
             </div>
 
@@ -1224,6 +1393,13 @@ export function RootDashboardPage() {
                                 className="rounded-brand border border-slate-600 px-3 py-2 text-xs font-semibold text-muted hover:border-warning hover:text-warning"
                               >
                                 {academy.status === "suspended" ? "Habilitar" : "Suspender"}
+                              </button>
+                              <button
+                                onClick={() => void handleDeleteAcademy(academy)}
+                                disabled={deletingAcademyId === academy.id}
+                                className="rounded-brand border border-danger/50 px-3 py-2 text-xs font-semibold text-danger hover:bg-danger/10 disabled:opacity-50"
+                              >
+                                {deletingAcademyId === academy.id ? "Eliminando..." : "Eliminar"}
                               </button>
                             </div>
                           </td>
@@ -1339,20 +1515,73 @@ export function RootDashboardPage() {
   );
 }
 
-function KpiCard({ label, value, color }: { label: string; value: string | number; color: string }) {
+function KpiCard({
+  label,
+  value,
+  color,
+  helper,
+  accent = ""
+}: {
+  label: string;
+  value: string | number;
+  color: string;
+  helper?: string;
+  accent?: string;
+}) {
   return (
-    <div className="rounded-brand border border-slate-700/80 bg-surface p-4 shadow-soft">
-      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
-      <p className={`mt-2 font-display text-2xl ${color}`}>{value}</p>
+    <div className={`rounded-brand border border-[#262626] bg-[#1A1A1A] p-5 shadow-soft ${accent}`}>
+      <p className="text-xs uppercase tracking-wide text-[#B3B3B3]">{label}</p>
+      <p className={`mt-3 font-display text-3xl ${color}`}>{value}</p>
+      {helper ? <p className="mt-2 text-xs text-[#B3B3B3]">{helper}</p> : null}
     </div>
   );
 }
 
-function MetricInline({ label, value }: { label: string; value: string | number }) {
+function MetricInline({
+  label,
+  value,
+  helper,
+  tone
+}: {
+  label: string;
+  value: string | number;
+  helper?: string;
+  tone: "success" | "warning" | "danger";
+}) {
+  const toneStyles = {
+    success: "text-[#00C896]",
+    warning: "text-[#F5A524]",
+    danger: "text-[#FF4D4F]"
+  } satisfies Record<typeof tone, string>;
+
   return (
-    <div className="rounded-brand border border-slate-800 bg-surface px-4 py-3">
-      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
-      <p className="mt-2 text-xl font-semibold text-text">{value}</p>
+    <div className="rounded-brand border border-[#262626] bg-[#1A1A1A] px-5 py-4">
+      <p className="text-xs uppercase tracking-wide text-[#B3B3B3]">{label}</p>
+      <p className={`mt-3 text-3xl font-semibold ${toneStyles[tone]}`}>{value}</p>
+      {helper ? <p className="mt-2 text-xs text-[#B3B3B3]">{helper}</p> : null}
+    </div>
+  );
+}
+
+function AlertCard({
+  title,
+  detail,
+  tone
+}: {
+  title: string;
+  detail: string;
+  tone: "success" | "warning" | "danger";
+}) {
+  const toneStyles = {
+    success: "border-[#00C896]/25 bg-[#00C896]/8 text-[#00C896]",
+    warning: "border-[#F5A524]/25 bg-[#F5A524]/8 text-[#F5A524]",
+    danger: "border-[#FF4D4F]/25 bg-[#FF4D4F]/8 text-[#FF4D4F]"
+  } satisfies Record<typeof tone, string>;
+
+  return (
+    <div className={`rounded-brand border p-4 ${toneStyles[tone]}`}>
+      <p className="text-sm font-semibold">{title}</p>
+      <p className="mt-2 text-xs text-[#B3B3B3]">{detail}</p>
     </div>
   );
 }
@@ -1398,7 +1627,7 @@ function SectionTab({
       className={`rounded-brand px-3 py-2 text-xs font-semibold transition ${
         active
           ? "bg-primary text-bg"
-          : "border border-slate-600 text-muted hover:border-primary hover:text-primary"
+          : "border border-slate-600 text-muted hover:border-[#00D1FF] hover:text-[#00D1FF]"
       } disabled:cursor-not-allowed disabled:opacity-40`}
     >
       {label}

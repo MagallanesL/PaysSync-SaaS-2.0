@@ -17,6 +17,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode
 } from "react";
@@ -37,6 +38,9 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+const SESSION_IDLE_MINUTES = Math.max(1, Number(import.meta.env.VITE_SESSION_IDLE_MINUTES ?? "30"));
+const SESSION_IDLE_TIMEOUT_MS = SESSION_IDLE_MINUTES * 60 * 1000;
+let platformConfigCachePromise: Promise<ReturnType<typeof normalizePlatformConfig>> | null = null;
 
 async function loadUserProfile(uid: string): Promise<UserProfile | null> {
   const userRef = doc(db, "users", uid);
@@ -51,6 +55,49 @@ async function loadUserProfile(uid: string): Promise<UserProfile | null> {
   };
 }
 
+async function ensureUserProfile(user: User): Promise<UserProfile> {
+  const fallbackProfile: UserProfile = {
+    email: user.email ?? "",
+    displayName: user.displayName ?? "",
+    platformRole: "user",
+    active: true
+  };
+
+  await setDoc(
+    doc(db, "users", user.uid),
+    {
+      email: fallbackProfile.email,
+      displayName: fallbackProfile.displayName,
+      platformRole: "user",
+      active: true,
+      updatedAt: serverTimestamp(),
+      createdAt: serverTimestamp()
+    },
+    { merge: true }
+  );
+
+  return fallbackProfile;
+}
+
+async function loadPlatformConfigCached() {
+  if (!platformConfigCachePromise) {
+    platformConfigCachePromise = getDoc(doc(db, "platform", "config")).then((configSnap) =>
+      normalizePlatformConfig(configSnap.exists() ? configSnap.data() : DEFAULT_PLATFORM_CONFIG)
+    );
+  }
+
+  return platformConfigCachePromise;
+}
+
+async function safeGetDocs<T>(promise: Promise<T>) {
+  try {
+    return await promise;
+  } catch (error) {
+    console.warn("PaySync auth lookup fallback", error);
+    return null;
+  }
+}
+
 function isMembershipActive(status: unknown) {
   const normalized = String(status ?? "").toLowerCase().trim();
   return normalized === "active" || normalized === "activo";
@@ -58,16 +105,25 @@ function isMembershipActive(status: unknown) {
 
 async function loadActiveMembership(uid: string, email?: string): Promise<AcademyMembership | null> {
   const normalizedEmail = email?.toLowerCase().trim();
-  const configSnap = await getDoc(doc(db, "platform", "config"));
-  const platformConfig = normalizePlatformConfig(configSnap.exists() ? configSnap.data() : DEFAULT_PLATFORM_CONFIG);
-
   const ownerByUidQuery = query(collection(db, "academies"), where("owner.uid", "==", uid), limit(5));
-  const ownerByUidSnap = await getDocs(ownerByUidQuery);
-  let ownerAcademyDoc = ownerByUidSnap.docs.find((docSnap) => docSnap.data().status !== "suspended");
+  const ownerByEmailQuery = normalizedEmail
+    ? query(collection(db, "academies"), where("owner.email", "==", normalizedEmail), limit(5))
+    : null;
+  const byUserIdQuery = query(collectionGroup(db, "users"), where("userId", "==", uid), limit(20));
+  const byEmailQuery = normalizedEmail
+    ? query(collectionGroup(db, "users"), where("email", "==", normalizedEmail), limit(20))
+    : null;
+  const byMailQuery = normalizedEmail
+    ? query(collectionGroup(db, "users"), where("mail", "==", normalizedEmail), limit(20))
+    : null;
 
-  if (!ownerAcademyDoc && normalizedEmail) {
-    const ownerByEmailQuery = query(collection(db, "academies"), where("owner.email", "==", normalizedEmail), limit(5));
-    const ownerByEmailSnap = await getDocs(ownerByEmailQuery);
+  const platformConfig = await loadPlatformConfigCached();
+  const ownerByUidSnap = await safeGetDocs(getDocs(ownerByUidQuery));
+  const ownerByEmailSnap = ownerByEmailQuery ? await safeGetDocs(getDocs(ownerByEmailQuery)) : null;
+
+  let ownerAcademyDoc = ownerByUidSnap?.docs.find((docSnap) => docSnap.data().status !== "suspended");
+
+  if (!ownerAcademyDoc && ownerByEmailSnap) {
     ownerAcademyDoc = ownerByEmailSnap.docs.find((docSnap) => docSnap.data().status !== "suspended");
   }
 
@@ -92,7 +148,7 @@ async function loadActiveMembership(uid: string, email?: string): Promise<Academ
       return null;
     }
 
-    await setDoc(
+    void setDoc(
       doc(db, `academies/${ownerAcademyDoc.id}/users/${uid}`),
       {
         userId: uid,
@@ -115,19 +171,16 @@ async function loadActiveMembership(uid: string, email?: string): Promise<Academ
     };
   }
 
-  // Single-filter query avoids requiring a composite index for userId+status.
-  const byUserIdQuery = query(collectionGroup(db, "users"), where("userId", "==", uid), limit(20));
-  const byUserIdSnap = await getDocs(byUserIdQuery);
-  let membershipDoc = byUserIdSnap.docs.find((docSnap) => isMembershipActive(docSnap.data().status));
+  const byUserIdSnap = await safeGetDocs(getDocs(byUserIdQuery));
+  const byEmailSnap = byEmailQuery ? await safeGetDocs(getDocs(byEmailQuery)) : null;
+  const byMailSnap = byMailQuery ? await safeGetDocs(getDocs(byMailQuery)) : null;
 
-  if (!membershipDoc && email) {
-    const byEmailQuery = query(collectionGroup(db, "users"), where("email", "==", email.toLowerCase().trim()), limit(20));
-    const byEmailSnap = await getDocs(byEmailQuery);
+  let membershipDoc = byUserIdSnap?.docs.find((docSnap) => isMembershipActive(docSnap.data().status));
+
+  if (!membershipDoc && byEmailSnap) {
     membershipDoc = byEmailSnap.docs.find((docSnap) => isMembershipActive(docSnap.data().status));
   }
-  if (!membershipDoc && email) {
-    const byMailQuery = query(collectionGroup(db, "users"), where("mail", "==", email.toLowerCase().trim()), limit(20));
-    const byMailSnap = await getDocs(byMailQuery);
+  if (!membershipDoc && byMailSnap) {
     membershipDoc = byMailSnap.docs.find((docSnap) => isMembershipActive(docSnap.data().status));
   }
 
@@ -173,6 +226,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [membership, setMembership] = useState<AcademyMembership | null>(null);
   const [loading, setLoading] = useState(true);
+  const idleTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -188,11 +242,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         const loadedProfile = await loadUserProfile(user.uid);
-        setProfile(loadedProfile);
+        const effectiveProfile = loadedProfile ?? (await ensureUserProfile(user));
+        setProfile(effectiveProfile);
 
-        if (!loadedProfile) {
-          setMembership(null);
-        } else if (loadedProfile.platformRole === "root") {
+        if (effectiveProfile.platformRole === "root") {
           setMembership(null);
         } else {
           const activeMembership = await loadActiveMembership(user.uid, user.email ?? undefined);
@@ -206,6 +259,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (!firebaseUser) {
+      if (idleTimeoutRef.current !== null) {
+        window.clearTimeout(idleTimeoutRef.current);
+        idleTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    const resetIdleTimer = () => {
+      if (idleTimeoutRef.current !== null) {
+        window.clearTimeout(idleTimeoutRef.current);
+      }
+      idleTimeoutRef.current = window.setTimeout(() => {
+        void signOut(auth);
+      }, SESSION_IDLE_TIMEOUT_MS);
+    };
+
+    const events: Array<keyof WindowEventMap> = ["click", "keydown", "mousemove", "scroll", "touchstart", "focus"];
+    events.forEach((eventName) => window.addEventListener(eventName, resetIdleTimer, { passive: true }));
+    resetIdleTimer();
+
+    return () => {
+      if (idleTimeoutRef.current !== null) {
+        window.clearTimeout(idleTimeoutRef.current);
+        idleTimeoutRef.current = null;
+      }
+      events.forEach((eventName) => window.removeEventListener(eventName, resetIdleTimer));
+    };
+  }, [firebaseUser]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

@@ -1,8 +1,13 @@
 import { collection, doc, getDoc, getDocs, serverTimestamp, updateDoc } from "firebase/firestore";
+<<<<<<< HEAD
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+=======
+import { httpsCallable } from "firebase/functions";
+import { useEffect, useMemo, useRef, useState } from "react";
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
-import { db } from "../../lib/firebase";
+import { db, functions } from "../../lib/firebase";
 import {
   DEFAULT_ACADEMY_BILLING_SETTINGS,
   normalizeAcademyBillingSettings,
@@ -21,7 +26,17 @@ import {
 import { getTrialEndsAtMillis } from "../../lib/trial";
 import type { Academy, AcademyPlan } from "../../lib/types";
 
+<<<<<<< HEAD
 type AcademySettings = Pick<Academy, "name" | "plan" | "status" | "planLimits" | "trial" | "createdAt" | "billingSettings">;
+=======
+type AcademySettings = Pick<Academy, "name" | "plan" | "status" | "planLimits" | "trial" | "subscription" | "createdAt" | "operations">;
+type CheckoutStatusTone = "success" | "warning" | "danger";
+
+interface CheckoutStatusMessage {
+  tone: CheckoutStatusTone;
+  text: string;
+}
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const SUPPORT_PHONE = "5492657716071";
@@ -103,9 +118,46 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<AcademySettings | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig>(DEFAULT_PLATFORM_CONFIG);
   const [studentsCount, setStudentsCount] = useState(0);
+<<<<<<< HEAD
   const [billingForm, setBillingForm] = useState<AcademyBillingSettings>(DEFAULT_ACADEMY_BILLING_SETTINGS);
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
+=======
+  const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState<AcademyPlan | null>(null);
+  const [checkoutStatusMessage, setCheckoutStatusMessage] = useState<CheckoutStatusMessage | null>(null);
+  const [defaultBillingDay, setDefaultBillingDay] = useState("10");
+  const [billingDayStatus, setBillingDayStatus] = useState<string | null>(null);
+  const checkoutReconcileAttemptRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const checkoutStatus = params.get("checkout_status");
+    const plan = params.get("plan");
+    if (!checkoutStatus) return;
+
+    if (checkoutStatus === "success") {
+      setCheckoutStatusMessage({
+        tone: "success",
+        text: `El pago para el plan ${plan ?? ""} fue enviado. Cuando Mercado Pago lo acredite, tu plan se activara automaticamente.`
+      });
+    } else if (checkoutStatus === "pending") {
+      setCheckoutStatusMessage({
+        tone: "warning",
+        text: "El pago quedo pendiente. Tu plan cambiara de forma automatica apenas Mercado Pago lo marque como aprobado."
+      });
+    } else if (checkoutStatus === "failure") {
+      setCheckoutStatusMessage({
+        tone: "danger",
+        text: "El pago no se completo. Puedes intentarlo nuevamente cuando quieras."
+      });
+    }
+
+    params.delete("checkout_status");
+    params.delete("plan");
+    const nextQuery = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`);
+  }, []);
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
 
   useEffect(() => {
     async function loadSettings() {
@@ -114,6 +166,7 @@ export function SettingsPage() {
           name: "Centro Demo",
           plan: "pro",
           status: "active",
+<<<<<<< HEAD
           planLimits: { maxStudents: 100 },
           billingSettings: {
             defaultDueDay: 10,
@@ -121,12 +174,23 @@ export function SettingsPage() {
             lateFeeStartsAfterDays: 3,
             lateFeeType: "fixed",
             lateFeeValue: 2500
+=======
+          planLimits: {
+            maxStudents: 100
+          },
+          subscription: {
+            billingStatus: "paid"
+          },
+          operations: {
+            defaultBillingDay: 10
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
           }
         };
         setSettings(previewSettings);
         setBillingForm(normalizeAcademyBillingSettings(previewSettings.billingSettings));
         setStudentsCount(37);
         setPlatformConfig(DEFAULT_PLATFORM_CONFIG);
+        setDefaultBillingDay("10");
         return;
       }
 
@@ -139,9 +203,15 @@ export function SettingsPage() {
       ]);
 
       if (academySnap.exists()) {
+<<<<<<< HEAD
         const nextSettings = academySnap.data() as AcademySettings;
         setSettings(nextSettings);
         setBillingForm(normalizeAcademyBillingSettings(nextSettings.billingSettings));
+=======
+        const academyData = academySnap.data() as AcademySettings;
+        setSettings(academyData);
+        setDefaultBillingDay(String(academyData.operations?.defaultBillingDay ?? 10));
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
       }
       setStudentsCount(studentsSnap.size);
       setPlatformConfig(normalizePlatformConfig(configSnap.exists() ? configSnap.data() : undefined));
@@ -149,6 +219,33 @@ export function SettingsPage() {
 
     void loadSettings();
   }, [isPreviewMode, membership]);
+
+  useEffect(() => {
+    async function reconcilePendingCheckout() {
+      if (isPreviewMode || !membership || !settings?.subscription?.pendingPlan) return;
+
+      const reconcileKey = `${membership.academyId}:${settings.subscription.pendingPlan}`;
+      if (checkoutReconcileAttemptRef.current === reconcileKey) return;
+      checkoutReconcileAttemptRef.current = reconcileKey;
+
+      try {
+        const reconcile = httpsCallable<{ academyId: string }, { processed: number }>(
+          functions,
+          "reconcileMercadoPagoPayments"
+        );
+        await reconcile({ academyId: membership.academyId });
+
+        const academySnap = await getDoc(doc(db, "academies", membership.academyId));
+        if (academySnap.exists()) {
+          setSettings(academySnap.data() as AcademySettings);
+        }
+      } catch {
+        checkoutReconcileAttemptRef.current = null;
+      }
+    }
+
+    void reconcilePendingCheckout();
+  }, [isPreviewMode, membership, settings?.subscription?.pendingPlan]);
 
   const usage = useMemo(() => {
     if (!settings) return { limit: null as number | null, usagePercent: 0, usageLabel: "0" };
@@ -195,7 +292,65 @@ export function SettingsPage() {
     window.setTimeout(() => setSaveFeedback(null), 2500);
   }
 
+  async function handleSaveBillingDay() {
+    if (!membership || isPreviewMode || !canWriteAcademyData) return;
+
+    const parsedDay = Math.min(28, Math.max(1, Math.round(Number(defaultBillingDay || 10))));
+    await updateDoc(doc(db, "academies", membership.academyId), {
+      operations: {
+        ...(settings?.operations ?? {}),
+        defaultBillingDay: parsedDay
+      },
+      updatedAt: serverTimestamp()
+    });
+    setBillingDayStatus(`Vencimiento por defecto actualizado al dia ${parsedDay}.`);
+    setSettings((prev) =>
+      prev
+        ? {
+            ...prev,
+            operations: {
+              ...(prev.operations ?? {}),
+              defaultBillingDay: parsedDay
+            }
+          }
+        : prev
+    );
+    setDefaultBillingDay(String(parsedDay));
+  }
+
+  async function handlePlanCheckout(plan: AcademyPlan) {
+    if (!membership || isPreviewMode) return;
+
+    setCheckoutLoadingPlan(plan);
+    setCheckoutStatusMessage(null);
+    try {
+      const createCheckout = httpsCallable<
+        { academyId: string; plan: AcademyPlan; origin: string },
+        { initPoint: string }
+      >(functions, "createMercadoPagoCheckout");
+      const result = await createCheckout({
+        academyId: membership.academyId,
+        plan,
+        origin: window.location.origin
+      });
+
+      if (!result.data?.initPoint) {
+        throw new Error("No se recibio URL de pago.");
+      }
+
+      window.location.assign(result.data.initPoint);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo iniciar el checkout.";
+      setCheckoutStatusMessage({
+        tone: "danger",
+        text: message
+      });
+      setCheckoutLoadingPlan(null);
+    }
+  }
+
   return (
+<<<<<<< HEAD
     <>
       <div className="grid gap-4">
         <Panel title="Configuracion del centro">
@@ -208,6 +363,59 @@ export function SettingsPage() {
                     <h2 className="mt-2 font-display text-3xl text-text">{settings.name}</h2>
                     <p className="mt-2 max-w-2xl text-sm text-muted">
                       Define como quieres cobrar: dia general de vencimiento, recargos automaticos y reglas base del centro.
+=======
+    <div className="grid gap-4">
+      <Panel title="Configuracion del centro">
+        {checkoutStatusMessage && (
+          <div
+            className={`rounded-brand border px-4 py-3 text-sm ${
+              checkoutStatusMessage.tone === "success"
+                ? "border-secondary/40 bg-secondary/10 text-secondary"
+                : checkoutStatusMessage.tone === "warning"
+                  ? "border-warning/40 bg-warning/10 text-warning"
+                  : "border-danger/40 bg-danger/10 text-danger"
+            }`}
+          >
+            {checkoutStatusMessage.text}
+          </div>
+        )}
+
+        <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+          <div className="grid gap-4">
+            <section className="rounded-brand border border-[rgba(0,209,255,0.18)] bg-gradient-to-br from-[rgba(0,209,255,0.10)] via-[#0B0F1A] to-[rgba(34,197,94,0.08)] p-5 shadow-soft">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.24em] text-primary">Estado actual del centro</p>
+                  <h2 className="mt-2 font-display text-3xl text-text">{settings.name}</h2>
+                  <p className="mt-2 max-w-2xl text-sm text-muted">
+                    Revisa tu plan, capacidad disponible y el estado de cuenta sin perder foco en la operacion.
+                  </p>
+                </div>
+                <div className="rounded-brand border border-slate-700/80 bg-slate-950/40 px-4 py-3">
+                  <p className="text-xs uppercase tracking-wide text-muted">Plan actual</p>
+                  <p className="mt-1 text-xl font-semibold text-primary">{getPlanLabel(platformConfig, settings.plan)}</p>
+                  <p className="mt-1 text-sm text-secondary">${currentPlanPrice}/mes</p>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <InfoCard label="Capacidad usada" value={usage.limit === null ? "Ilimitada" : usage.usageLabel} accent="text-secondary" />
+                <InfoCard label="Plan activo" value={getPlanLabel(platformConfig, settings.plan)} accent="text-primary" />
+                <InfoCard label="Abono mensual" value={`$${currentPlanPrice}`} accent="text-secondary" />
+              </div>
+            </section>
+
+            <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="rounded-brand border border-slate-700 bg-bg p-4">
+                <p className="text-xs uppercase tracking-wide text-muted">Uso del plan</p>
+                <div className="mt-3 flex items-end justify-between gap-3">
+                  <div>
+                    <p className="text-2xl font-semibold text-text">{usage.usageLabel}</p>
+                    <p className="mt-1 text-sm text-muted">
+                      {usage.limit === null
+                        ? "Tu plan no tiene limite de alumnos configurado."
+                        : "Entiende de inmediato cuanto margen real te queda para sumar alumnos."}
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -229,6 +437,7 @@ export function SettingsPage() {
                   </div>
                 </div>
 
+<<<<<<< HEAD
                 <div className="mt-5 grid gap-3 sm:grid-cols-3">
                   <InfoCard label="Plan actual" value={getPlanLabel(platformConfig, settings.plan)} accent="text-primary" />
                   <InfoCard label="Capacidad" value={usage.limit === null ? "Ilimitada" : usage.usageLabel} accent="text-secondary" />
@@ -243,6 +452,22 @@ export function SettingsPage() {
                     <h3 className="mt-1 text-lg font-semibold text-text">Como funciona el centro al cobrar</h3>
                     <p className="mt-1 max-w-2xl text-sm text-muted">
                       Estas reglas se usan para definir vencimientos por defecto y calcular recargos automaticamente cuando una cuota sigue impaga.
+=======
+                {usage.limit !== null ? (
+                  <div className="mt-4">
+                    <div className="h-3 overflow-hidden rounded-full bg-slate-800">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          usage.usagePercent >= 85 ? "bg-warning" : usage.usagePercent >= 60 ? "bg-primary" : "bg-secondary"
+                        }`}
+                        style={{ width: `${Math.max(8, usage.usagePercent)}%` }}
+                      />
+                    </div>
+                    <p className="mt-2 text-xs text-muted">
+                      {usage.limit - studentsCount > 0
+                        ? `Te quedan ${usage.limit - studentsCount} lugares disponibles.`
+                        : "Estas en el limite actual del plan."}
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
                     </p>
                   </div>
                   {saveFeedback && <span className="rounded-brand bg-secondary/15 px-3 py-2 text-xs font-semibold text-secondary">{saveFeedback}</span>}
@@ -392,13 +617,18 @@ export function SettingsPage() {
 
             <aside className="grid gap-4">
               <div className="rounded-brand border border-slate-700 bg-bg p-4">
+<<<<<<< HEAD
                 <p className="text-xs uppercase tracking-wide text-muted">Resumen operativo</p>
+=======
+                <p className="text-xs uppercase tracking-wide text-muted">Estado del centro</p>
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
                 <div className="mt-3 grid gap-3">
                   <SignalCard
                     title={`Plan ${getPlanLabel(platformConfig, settings.plan)}`}
                     detail={`${getPlanDescription(platformConfig, settings.plan)} ${getPlanHighlight(platformConfig, settings.plan)}.`}
                     accent="text-primary"
                   />
+<<<<<<< HEAD
                   <SignalCard
                     title="Capacidad actual"
                     detail={
@@ -413,22 +643,76 @@ export function SettingsPage() {
                     detail={`Vencimiento general el dia ${billingForm.defaultDueDay}. ${getLateFeeLabel(billingForm)}.`}
                     accent="text-warning"
                   />
+=======
+                    <SignalCard
+                      title="Diferencial"
+                      detail={getPlanHighlight(platformConfig, settings.plan)}
+                      accent="text-secondary"
+                    />
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
                   {trialSummary ? (
                     <SignalCard title={trialSummary.title} detail={trialSummary.detail} accent={trialSummary.accent} />
                   ) : (
                     <SignalCard
+<<<<<<< HEAD
                       title="Configuracion lista"
                       detail="El centro ya tiene definidas sus reglas base para trabajar el dia a dia."
+=======
+                      title="Centro listo para operar"
+                      detail="Tu cuenta esta lista para cobrar, organizar alumnos y seguir el estado del plan."
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
                       accent="text-secondary"
                     />
                   )}
                 </div>
               </div>
+<<<<<<< HEAD
             </aside>
+=======
+            </section>
+
+            <section className="rounded-brand border border-slate-700 bg-bg p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted">Cobranza operativa</p>
+                  <p className="mt-2 text-sm text-muted">
+                    Define el dia de vencimiento por defecto para nuevas asignaciones y nuevas cuotas mensuales.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <label className="grid gap-1 text-sm text-muted">
+                    Dia de vencimiento
+                    <input
+                      type="number"
+                      min="1"
+                      max="28"
+                      value={defaultBillingDay}
+                      onChange={(event) => setDefaultBillingDay(event.target.value)}
+                      className="rounded-brand border border-slate-600 bg-slate-950/30 px-3 py-2 text-text outline-none focus:border-primary"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveBillingDay()}
+                    disabled={!canWriteAcademyData || isPreviewMode}
+                    className="rounded-brand bg-primary px-4 py-2 text-sm font-semibold text-bg disabled:opacity-40"
+                  >
+                    Guardar
+                  </button>
+                </div>
+              </div>
+              <p className="mt-3 text-xs text-muted">
+                Este ajuste se aplica a nuevas cuotas. No modifica periodos ya generados.
+              </p>
+              {billingDayStatus ? <p className="mt-2 text-xs text-secondary">{billingDayStatus}</p> : null}
+            </section>
+
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
           </div>
         </Panel>
       </div>
 
+<<<<<<< HEAD
       {isPlanModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
           <div
@@ -454,6 +738,11 @@ export function SettingsPage() {
                 Cerrar
               </button>
             </div>
+=======
+          <aside className="rounded-brand border border-slate-700 bg-bg p-4">
+            <p className="text-xs uppercase tracking-wide text-muted">Planes disponibles</p>
+            <p className="mt-2 text-sm text-muted">Comparalos rapido sin quitar protagonismo al estado actual del centro.</p>
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
 
             <div className="grid gap-3 md:grid-cols-3">
               {(["basic", "pro", "premium"] as const).map((plan) => {
@@ -486,6 +775,7 @@ export function SettingsPage() {
                       ))}
                     </ul>
 
+<<<<<<< HEAD
                     <a
                       href={buildSupportLink(
                         settings.name,
@@ -502,6 +792,44 @@ export function SettingsPage() {
                     >
                       {isCurrent ? "Consultar este plan" : "Solicitar cambio"}
                     </a>
+=======
+                    <div className="mt-4 flex items-center justify-between gap-3">
+                      <span className="text-xs text-muted">
+                        {plan === "basic"
+                          ? "Para centros que arrancan"
+                          : plan === "pro"
+                            ? "Para crecer con mas orden"
+                            : "Para operar con amplitud"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void handlePlanCheckout(plan)}
+                        disabled={
+                          isPreviewMode ||
+                          membership?.role !== "owner" ||
+                          (settings.status === "active" && isCurrent) ||
+                          checkoutLoadingPlan !== null
+                        }
+                        className={`rounded-brand px-3 py-2 text-xs font-semibold ${
+                          isCurrent
+                            ? settings.status === "trial"
+                              ? "bg-primary text-bg hover:brightness-110 disabled:opacity-50"
+                              : "border border-primary/40 bg-primary/15 text-primary disabled:opacity-50"
+                            : "bg-primary text-bg hover:brightness-110 disabled:opacity-50"
+                        }`}
+                      >
+                        {checkoutLoadingPlan === plan
+                          ? "Redirigiendo..."
+                          : isCurrent
+                            ? settings.status === "trial"
+                              ? "Pagar este plan"
+                              : "Plan actual"
+                            : settings.status === "trial"
+                              ? "Pagar y activar"
+                              : "Pagar y cambiar"}
+                      </button>
+                    </div>
+>>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
                   </div>
                 );
               })}

@@ -26,7 +26,7 @@ export interface PlatformConfig {
 }
 
 export const DEFAULT_PLATFORM_CONFIG: PlatformConfig = {
-  trialDurationDays: 15,
+  trialDurationDays: 14,
   plans: {
     basic: {
       label: "Basico",
