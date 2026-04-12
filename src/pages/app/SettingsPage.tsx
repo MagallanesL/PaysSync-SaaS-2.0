@@ -1,8 +1,9 @@
 import { collection, doc, getDoc, getDocs, serverTimestamp, updateDoc } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
-import { db } from "../../lib/firebase";
+import { db, functions } from "../../lib/firebase";
 import {
   DEFAULT_ACADEMY_BILLING_SETTINGS,
   normalizeAcademyBillingSettings,
@@ -98,6 +99,15 @@ function getLateFeeLabel(settings: AcademyBillingSettings) {
   return `${value} desde ${settings.lateFeeStartsAfterDays} dia${settings.lateFeeStartsAfterDays === 1 ? "" : "s"} de mora`;
 }
 
+type CreateCheckoutResult = {
+  checkoutSessionId: string;
+  preferenceId: string | null;
+  initPoint: string;
+  plan: AcademyPlan;
+  amount: number;
+  reused?: boolean;
+};
+
 export function SettingsPage() {
   const { membership, profile, isPreviewMode, canWriteAcademyData } = useAuth();
   const [settings, setSettings] = useState<AcademySettings | null>(null);
@@ -106,6 +116,21 @@ export function SettingsPage() {
   const [billingForm, setBillingForm] = useState<AcademyBillingSettings>(DEFAULT_ACADEMY_BILLING_SETTINGS);
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
+  const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState<AcademyPlan | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+
+  const createMercadoPagoCheckout = useMemo(
+    () =>
+      httpsCallable<
+        {
+          academyId: string;
+          plan: AcademyPlan;
+          origin: string;
+        },
+        CreateCheckoutResult
+      >(functions, "createMercadoPagoCheckout"),
+    []
+  );
 
   useEffect(() => {
     async function loadSettings() {
@@ -192,6 +217,38 @@ export function SettingsPage() {
     setSettings((prev) => (prev ? { ...prev, billingSettings: normalizedSettings } : prev));
     setSaveFeedback("Configuracion operativa guardada.");
     window.setTimeout(() => setSaveFeedback(null), 2500);
+  }
+
+  async function handlePlanCheckout(plan: AcademyPlan) {
+    if (!membership || isPreviewMode) return;
+    if (!canWriteAcademyData) {
+      setCheckoutError("Solo el owner puede gestionar el pago del plan.");
+      return;
+    }
+    if (typeof window === "undefined") return;
+
+    setCheckoutError(null);
+    setCheckoutLoadingPlan(plan);
+
+    try {
+      const result = await createMercadoPagoCheckout({
+        academyId: membership.academyId,
+        plan,
+        origin: window.location.origin
+      });
+
+      const initPoint = result.data.initPoint?.trim();
+      if (!initPoint) {
+        throw new Error("Mercado Pago no devolvio una URL valida para continuar.");
+      }
+
+      window.location.assign(initPoint);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo iniciar el checkout de Mercado Pago.";
+      setCheckoutError(message);
+    } finally {
+      setCheckoutLoadingPlan(null);
+    }
   }
 
   return (
@@ -454,9 +511,16 @@ export function SettingsPage() {
               </button>
             </div>
 
+            {checkoutError ? (
+              <div className="mb-4 rounded-brand border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+                {checkoutError}
+              </div>
+            ) : null}
+
             <div className="grid gap-3 md:grid-cols-3">
               {(["basic", "pro", "premium"] as const).map((plan) => {
                 const isCurrent = plan === settings.plan;
+                const isLoading = checkoutLoadingPlan === plan;
                 return (
                   <div key={plan} className={`rounded-brand border p-4 ${isCurrent ? "border-primary bg-primary/10" : "border-slate-700 bg-bg"}`}>
                     <div className="flex items-start justify-between gap-3">
@@ -485,22 +549,16 @@ export function SettingsPage() {
                       ))}
                     </ul>
 
-                    <a
-                      href={buildSupportLink(
-                        settings.name,
-                        profile?.displayName ?? "Owner",
-                        isCurrent
-                          ? `Quiero consultar detalles de mi plan actual ${getPlanLabel(platformConfig, plan)}.`
-                          : `Quiero solicitar el cambio al plan ${getPlanLabel(platformConfig, plan)}.`
-                      )}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      disabled={isLoading || (!isCurrent && !canWriteAcademyData) || isPreviewMode}
+                      onClick={() => void handlePlanCheckout(plan)}
                       className={`mt-4 inline-flex w-full items-center justify-center rounded-brand px-3 py-2 text-xs font-semibold ${
                         isCurrent ? "border border-primary/40 bg-primary/15 text-primary" : "bg-primary text-bg hover:brightness-110"
                       }`}
                     >
-                      {isCurrent ? "Consultar este plan" : "Solicitar cambio"}
-                    </a>
+                      {isLoading ? "Redirigiendo..." : isCurrent ? "Pagar este plan" : "Elegir y pagar"}
+                    </button>
                   </div>
                 );
               })}
