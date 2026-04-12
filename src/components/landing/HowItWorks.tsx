@@ -13,7 +13,7 @@ export function HowItWorks() {
     <section id="como-funciona" className="rounded-[30px] border border-white/10 bg-[#121212] px-5 py-8 sm:px-7 sm:py-10">
       <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#00C896]">Demo</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#00C896]">Como funciona</p>
           <h2 className="mt-3 text-[1.9rem] font-semibold leading-tight text-white sm:text-[2.6rem]">Asi funciona PaySync</h2>
           <p className="mt-4 text-base leading-7 text-[#B3B3B3]">
             La idea es simple: menos tiempo buscando pagos y mas claridad para saber que hacer cada mes.

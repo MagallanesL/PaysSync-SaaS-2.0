@@ -20,7 +20,7 @@ export function Testimonials() {
   return (
     <section className="rounded-[30px] border border-white/10 bg-[#121212] px-5 py-8 sm:px-7 sm:py-10">
       <div className="max-w-3xl">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#00C896]">Prueba social</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#00C896]">Experiencias reales</p>
         <h2 className="mt-3 text-[1.9rem] font-semibold leading-tight text-white sm:text-[2.6rem]">
           Academias como la tuya ya lo usan
         </h2>

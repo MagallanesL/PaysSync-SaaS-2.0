@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import {
   addDoc,
   collection,
@@ -10,20 +9,12 @@ import {
   serverTimestamp,
   updateDoc
 } from "firebase/firestore";
-=======
-import { serverTimestamp, updateDoc, doc } from "firebase/firestore";
->>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import {
-  FeesMobileList,
-  FeesSummaryCard,
-  FeesTable
-} from "../../components/app/fees/FeeUI";
-import { PaymentModal, type PaymentFormState } from "../../components/app/fees/PaymentModal";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
+import { formatBillingType, formatMembershipStatus } from "../../lib/display";
+import { db } from "../../lib/firebase";
 import {
-<<<<<<< HEAD
   applyBillingSettingsToFee,
   compareFeePriority,
   DEFAULT_ACADEMY_BILLING_SETTINGS,
@@ -187,51 +178,17 @@ function mergeAssignedDisciplines(
       allowPartial: Boolean(latest.allowPartial),
       price: latest.price
     };
-=======
-  formatPeriodLabel,
-  generateMonthlyFeesForCenter,
-  getCurrentPeriodParts,
-  getFeePriorityWindow,
-  loadAcademyBillingSnapshot,
-  registerPayment,
-  type AcademyBillingSnapshot,
-  type FeeRecord
-} from "../../lib/academyBilling";
-import { db } from "../../lib/firebase";
-
-const emptyForm: PaymentFormState = {
-  amount: "",
-  paymentDate: new Date().toISOString().slice(0, 10),
-  paymentMethod: "cash",
-  note: ""
-};
-
-function sortFees(fees: FeeRecord[]) {
-  return [...fees].sort((a, b) => {
-    const aDays = getFeePriorityWindow(a);
-    const bDays = getFeePriorityWindow(b);
-    const aIsDebt = a.balance > 0;
-    const bIsDebt = b.balance > 0;
-    const aIsOverdueDebt = a.status === "overdue" && aIsDebt;
-    const bIsOverdueDebt = b.status === "overdue" && bIsDebt;
-    const aIsUpcomingDebt = aDays >= 0 && aIsDebt;
-    const bIsUpcomingDebt = bDays >= 0 && bIsDebt;
-
-    if (aIsOverdueDebt !== bIsOverdueDebt) return aIsOverdueDebt ? -1 : 1;
-    if (aIsUpcomingDebt !== bIsUpcomingDebt) return aIsUpcomingDebt ? -1 : 1;
-    if (aDays !== bDays) return aDays - bDays;
-    return (a.studentName ?? "").localeCompare(b.studentName ?? "", "es", { sensitivity: "base" });
->>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
   });
 }
 
 export function FeesPage() {
-  const { membership, profile, canWriteAcademyData, isPreviewMode } = useAuth();
-  const [snapshot, setSnapshot] = useState<AcademyBillingSnapshot | null>(null);
-  const [selectedFee, setSelectedFee] = useState<FeeRecord | null>(null);
-  const [form, setForm] = useState<PaymentFormState>(emptyForm);
+  const { membership, canWriteAcademyData, isPreviewMode } = useAuth();
+  const [fees, setFees] = useState<Fee[]>([]);
+  const [students, setStudents] = useState<StudentOption[]>([]);
+  const [editingFee, setEditingFee] = useState<Fee | null>(null);
+  const [form, setForm] = useState<FeeFormState>(emptyForm);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-<<<<<<< HEAD
   const [billingSettings, setBillingSettings] = useState<AcademyBillingSettings>(DEFAULT_ACADEMY_BILLING_SETTINGS);
   const academyPath = membership ? `academies/${membership.academyId}` : null;
 
@@ -368,87 +325,80 @@ export function FeesPage() {
       }
     }
   }
-=======
-  const [isModalOpen, setIsModalOpen] = useState(false);
->>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
 
   async function loadData() {
     if (isPreviewMode) {
-      setSnapshot({
-        defaultBillingDay: 10,
-        students: [
-          {
-            id: "student-1",
-            fullName: "Ana Perez",
-            email: "ana@demo.com",
-            phone: "5491111111111",
-            emergencyContactName: "",
-            emergencyContactPhone: "",
-            allergies: "",
-            status: "active",
-            disciplines: []
-          },
-          {
-            id: "student-2",
-            fullName: "Bruno Diaz",
-            email: "",
-            phone: "5492222222222",
-            emergencyContactName: "",
-            emergencyContactPhone: "",
-            allergies: "",
-            status: "active",
-            disciplines: []
-          }
-        ],
-        disciplines: [],
-        enrollments: [],
-        fees: [
+      const previewStudents: StudentOption[] = [
+        {
+          id: "student-1",
+          fullName: "Ana Perez",
+          contactPhone: "5491111111111",
+          status: "active",
+          disciplines: [
+            {
+              disciplineId: "disc-1",
+              name: "Freestyle",
+              billingType: "monthly_fee",
+              paymentMode: "monthly",
+              allowPartial: false,
+              price: 20000
+            }
+          ]
+        },
+        {
+          id: "student-2",
+          fullName: "Bruno Diaz",
+          contactPhone: "5492222222222",
+          status: "active",
+          disciplines: [
+            {
+              disciplineId: "disc-2",
+              name: "Indumentaria oficial",
+              billingType: "uniform",
+              paymentMode: "one_time",
+              allowPartial: true,
+              price: 18000
+            }
+          ]
+        }
+      ];
+
+      const previewFees: Fee[] = sortFees(
+        [
           {
             id: "fee-1",
-            centerId: "demo",
             studentId: "student-1",
+            concept: "Cuota mensual 03/2026 - Freestyle",
+            category: "monthly_fee",
             disciplineId: "disc-1",
-            enrollmentId: "enr-1",
-            concept: "Voley - 03/2026",
-            periodYear: 2026,
-            periodMonth: 3,
-            dueDate: "2026-03-10",
-            originalAmount: 20000,
-            amountPaid: 8000,
-            balance: 12000,
-            status: "partial",
-            lateFeeAmount: 0,
-            totalAmount: 20000,
-            reminderStatus: "not_sent",
+            disciplineName: "Freestyle",
+            period: "2026-03",
+            observation: "Freestyle",
+            amount: 20000,
+            paidAmount: 20000,
+            balance: 0,
             paymentMode: "monthly",
-            partialAllowed: true,
-            studentName: "Ana Perez",
-            disciplineName: "Voley"
+            partialAllowed: false,
+            dueDate: "2026-03-10",
+            status: "paid"
           },
           {
             id: "fee-2",
-            centerId: "demo",
             studentId: "student-2",
+            concept: "Indumentaria - Indumentaria oficial",
+            category: "uniform",
             disciplineId: "disc-2",
-            enrollmentId: "enr-2",
-            concept: "Danza - 03/2026",
-            periodYear: 2026,
-            periodMonth: 3,
-            dueDate: "2026-03-05",
-            originalAmount: 18000,
-            amountPaid: 0,
-            balance: 18000,
-            status: "overdue",
-            lateFeeAmount: 0,
-            totalAmount: 18000,
-            reminderStatus: "not_sent",
-            paymentMode: "monthly",
+            disciplineName: "Indumentaria oficial",
+            observation: "Indumentaria oficial",
+            amount: 18000,
+            paidAmount: 6000,
+            balance: 12000,
+            paymentMode: "one_time",
             partialAllowed: true,
-            studentName: "Bruno Diaz",
-            disciplineName: "Danza"
+            dueDate: "2026-03-08",
+            status: "overdue"
           }
         ],
-<<<<<<< HEAD
         previewStudents
       );
 
@@ -460,14 +410,10 @@ export function FeesPage() {
         lateFeeStartsAfterDays: 3,
         lateFeeType: "fixed",
         lateFeeValue: 2500
-=======
-        payments: []
->>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
       });
       return;
     }
 
-<<<<<<< HEAD
     if (!academyPath) return;
     const [academySnap, studentsSnap, disciplinesSnap, feesSnap] = await Promise.all([
       getDoc(doc(db, "academies", membership!.academyId)),
@@ -519,27 +465,23 @@ export function FeesPage() {
 
     setStudents(loadedStudents);
     setFees(sortFees(refreshedFees, loadedStudents));
-=======
-    if (!membership) return;
-    const billingSnapshot = await loadAcademyBillingSnapshot(membership.academyId, { includePayments: false });
-    setSnapshot(billingSnapshot);
->>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
   }
 
   useEffect(() => {
     void loadData();
-  }, [isPreviewMode, membership?.academyId]);
+  }, [academyPath, isPreviewMode]);
 
   useEffect(() => {
     if (!isModalOpen) return;
+
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape") closeModal();
     }
+
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
   }, [isModalOpen]);
 
-<<<<<<< HEAD
   const stats = useMemo(() => {
     const upcomingWindow = fees.filter((fee) => diffDays(fee.dueDate) <= 15);
     return {
@@ -570,30 +512,14 @@ export function FeesPage() {
             fee.balance
           )
         };
-=======
-  const currentPeriod = getCurrentPeriodParts();
-  const feeRows = useMemo(() => {
-    if (!snapshot) return [];
-    const activeStudentIds = new Set(snapshot.students.filter((student) => student.status === "active").map((student) => student.id));
-    return sortFees(
-      snapshot.fees.filter((fee) => {
-        const belongsToActiveStudent = activeStudentIds.has(fee.studentId);
-        const isCurrentPeriod = fee.periodYear === currentPeriod.year && fee.periodMonth === currentPeriod.month;
-        return belongsToActiveStudent && isCurrentPeriod;
->>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
       })
-    );
-  }, [currentPeriod.month, currentPeriod.year, snapshot]);
+      .filter((fee) => fee.daysLeft <= 15);
+  }, [fees, students]);
 
-  const stats = useMemo(() => {
-    const overdue = feeRows.filter((fee) => fee.status === "overdue").length;
-    const upcoming = feeRows.filter((fee) => fee.balance > 0 && getFeePriorityWindow(fee) >= 0 && getFeePriorityWindow(fee) <= 7).length;
-    const partial = feeRows.filter((fee) => fee.status === "partial").length;
-    const pendingBalance = feeRows.reduce((sum, fee) => sum + fee.balance, 0);
-    return { overdue, upcoming, partial, pendingBalance };
-  }, [feeRows]);
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canWriteAcademyData || !academyPath || !editingFee || isPreviewMode) return;
 
-<<<<<<< HEAD
     const nextAmount = editingFee.amount;
     const nextPaidAmount =
       form.paymentState === "full"
@@ -630,107 +556,43 @@ export function FeesPage() {
     });
 
     closeModal();
-=======
-  async function handleGenerateCurrentMonthFees() {
-    if (!membership || isPreviewMode) return;
-    await generateMonthlyFeesForCenter(membership.academyId);
->>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
     await loadData();
   }
 
-  function openPaymentModal(fee: FeeRecord) {
-    setSelectedFee(fee);
+  function openEditModal(fee: Fee) {
+    setEditingFee(fee);
     setForm({
-<<<<<<< HEAD
       paidAmount: fee.paidAmount > 0 && fee.paidAmount < fee.amount ? String(fee.paidAmount) : "",
       paymentState: fee.paidAmount >= fee.amount ? "full" : fee.paidAmount > 0 ? "partial" : "none"
-=======
-      amount: String(fee.balance || fee.totalAmount),
-      paymentDate: new Date().toISOString().slice(0, 10),
-      paymentMethod: "cash",
-      note: ""
->>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
     });
     setFormError(null);
     setIsModalOpen(true);
   }
 
   function closeModal() {
-    setSelectedFee(null);
+    setEditingFee(null);
     setForm(emptyForm);
     setFormError(null);
     setIsModalOpen(false);
   }
 
-  async function handleSavePayment(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!membership || !selectedFee || !canWriteAcademyData || isPreviewMode) return;
-
-    const amount = Number(form.amount || 0);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setFormError("Ingresa un monto valido.");
-      return;
-    }
-    if (amount > selectedFee.balance) {
-      setFormError("El pago no puede superar el saldo pendiente.");
-      return;
-    }
-
-    await registerPayment({
-      academyId: membership.academyId,
-      fee: selectedFee,
-      amount,
-      paymentDate: form.paymentDate,
-      paymentMethod: form.paymentMethod,
-      note: form.note,
-      createdBy: profile?.displayName ?? profile?.email ?? ""
-    });
-
-    closeModal();
-    await loadData();
-  }
-
-  async function handleMarkReminderSent(fee: FeeRecord) {
-    if (!membership || isPreviewMode) return;
-    const academyPath = `academies/${membership.academyId}`;
-    await updateDoc(doc(db, `${academyPath}/fees`, fee.id), {
-      reminderStatus: "sent",
-      reminderSentAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-    await loadData();
-  }
-
   return (
     <>
-      <Panel
-        title="Cobranza del mes"
-        action={
-          <button
-            type="button"
-            onClick={() => void handleGenerateCurrentMonthFees()}
-            disabled={!canWriteAcademyData || isPreviewMode}
-            className="rounded-brand border border-slate-600 px-3 py-2 text-xs font-semibold text-muted hover:border-primary hover:text-primary disabled:opacity-40"
-          >
-            {isPreviewMode ? "Modo demo" : "Generar cuotas del mes"}
-          </button>
-        }
-      >
-        <div className="mb-4 rounded-brand border border-[rgba(0,209,255,0.15)] bg-[rgba(0,209,255,0.06)] p-4 text-sm">
-          <p className="font-semibold text-text">Registrá pagos, controlá saldos y gestioná vencimientos en tiempo real.</p>
+      <Panel title="Cuotas">
+        <div className="mb-4 rounded-brand border border-primary/30 bg-primary/10 p-4 text-sm">
+          <p className="font-semibold text-text">Las cuotas se generan desde las disciplinas asignadas a cada alumno.</p>
           <p className="mt-1 text-muted">
-            Priorizá primero lo vencido, después lo que está por vencer, y resolvé la cobranza del mes desde una sola vista.
+            Aqui gestionas total, entregado, saldo, vencimiento y seguimiento. El estado se actualiza solo segun lo que falta cobrar.
           </p>
         </div>
 
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
-          <FeesSummaryCard label="Saldo pendiente" value={`$${stats.pendingBalance}`} color="text-[#FF4D4F]" helper="Dinero por cobrar" featured />
-          <FeesSummaryCard label="Vencidas" value={stats.overdue} color="text-[#FF4D4F]" helper="Requieren seguimiento" />
-          <FeesSummaryCard label="Por vencer" value={stats.upcoming} color="text-[#F59E0B]" helper="Vencen pronto" />
-          <FeesSummaryCard label="Parciales" value={stats.partial} color="text-[#00D1FF]" helper="Cobros incompletos" />
+          <Summary label="Vencidas" value={stats.overdue} color="text-danger" />
+          <Summary label="Por vencer" value={stats.upcoming} color="text-warning" />
+          <Summary label="Parciales" value={stats.partial} color="text-primary" />
+          <Summary label="Saldo pendiente" value={`$${stats.pendingBalance}`} color="text-danger" />
         </div>
 
-<<<<<<< HEAD
         <div className="mb-3 flex flex-wrap gap-3 text-xs text-muted">
           <span>En seguimiento: {stats.visible}</span>
           <span>Total de cuotas: {stats.total}</span>
@@ -1092,41 +954,3 @@ function Field({
     </label>
   );
 }
-=======
-        <FeesMobileList
-          fees={feeRows}
-          snapshot={snapshot}
-          canWrite={canWriteAcademyData}
-          isPreviewMode={isPreviewMode}
-          onRegisterPayment={openPaymentModal}
-          onReminderClick={(fee) => void handleMarkReminderSent(fee)}
-          onGenerateFees={() => void handleGenerateCurrentMonthFees()}
-        />
-
-        <FeesTable
-          fees={feeRows}
-          snapshot={snapshot}
-          canWrite={canWriteAcademyData}
-          isPreviewMode={isPreviewMode}
-          onRegisterPayment={openPaymentModal}
-          onReminderClick={(fee) => void handleMarkReminderSent(fee)}
-          onGenerateFees={() => void handleGenerateCurrentMonthFees()}
-          formatPeriodLabel={formatPeriodLabel}
-        />
-      </Panel>
-
-      <PaymentModal
-        isOpen={isModalOpen}
-        fee={selectedFee}
-        form={form}
-        formError={formError}
-        canWrite={canWriteAcademyData}
-        isPreviewMode={isPreviewMode}
-        onClose={closeModal}
-        onSubmit={(event) => void handleSavePayment(event)}
-        onFormChange={setForm}
-      />
-    </>
-  );
-}
->>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d

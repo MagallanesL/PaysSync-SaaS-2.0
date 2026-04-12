@@ -9,7 +9,7 @@ export function ProblemSection() {
   return (
     <section className="rounded-[30px] border border-white/10 bg-[#121212] px-5 py-8 sm:px-7 sm:py-10">
       <SectionIntro
-        eyebrow="El problema"
+        eyebrow="Lo que pasa hoy"
         title="Si manejas tu academia asi, estas perdiendo plata"
         description="Cuando los cobros viven repartidos entre chats, planillas y memoria, lo normal es cobrar tarde, olvidarte de alguien o perder tiempo todos los meses."
       />

@@ -1,24 +1,36 @@
 import {
+  addDoc,
   collection,
   doc,
+  getDocs,
+  orderBy,
+  query,
   serverTimestamp,
-  setDoc,
   updateDoc
 } from "firebase/firestore";
 import { useEffect, useState, type FormEvent } from "react";
 import { Panel } from "../../components/ui/Panel";
 import { useAuth } from "../../contexts/AuthContext";
-import { loadAcademyBillingSnapshot, type DisciplineRecord } from "../../lib/academyBilling";
-import { formatBillingType } from "../../lib/display";
 import { db } from "../../lib/firebase";
-import type { FeeCategory } from "../../lib/fees";
+import type { FeeCategory, FeePaymentMode } from "../../lib/fees";
+
+interface Discipline {
+  id: string;
+  name: string;
+  billingType: FeeCategory;
+  paymentMode?: FeePaymentMode;
+  allowPartial?: boolean;
+  price: number;
+  active: boolean;
+  note?: string;
+}
 
 interface DisciplineFormState {
   name: string;
-  category: FeeCategory;
-  modality: string;
-  baseAmount: string;
+  billingType: FeeCategory;
+  paymentMode: FeePaymentMode;
   allowPartial: boolean;
+  price: string;
   note: string;
 }
 
@@ -31,16 +43,21 @@ const categoryLabels: Record<FeeCategory, string> = {
   other: "Otro"
 };
 
+const paymentModeLabels: Record<FeePaymentMode, string> = {
+  monthly: "Mensual automatica",
+  one_time: "Cargo unico"
+};
+
 const emptyForm: DisciplineFormState = {
   name: "",
-  category: "monthly_fee",
-  modality: "",
-  baseAmount: "",
-  allowPartial: true,
+  billingType: "monthly_fee",
+  paymentMode: "monthly",
+  allowPartial: false,
+  price: "",
   note: ""
 };
 
-function sortDisciplines(items: DisciplineRecord[]) {
+function sortDisciplines(items: Discipline[]) {
   return [...items].sort((a, b) => {
     if (a.active !== b.active) return a.active ? -1 : 1;
     return a.name.localeCompare(b.name, "es", { sensitivity: "base" });
@@ -49,133 +66,105 @@ function sortDisciplines(items: DisciplineRecord[]) {
 
 export function DisciplinesPage() {
   const { membership, canWriteAcademyData, isPreviewMode } = useAuth();
-  const [disciplines, setDisciplines] = useState<DisciplineRecord[]>([]);
-  const [studentCountByDiscipline, setStudentCountByDiscipline] = useState<Map<string, number>>(new Map());
-  const [potentialByDiscipline, setPotentialByDiscipline] = useState<Map<string, number>>(new Map());
+  const academyPath = membership ? `academies/${membership.academyId}` : null;
+  const [disciplines, setDisciplines] = useState<Discipline[]>([]);
   const [form, setForm] = useState<DisciplineFormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  async function loadData() {
+  async function loadDisciplines() {
     if (isPreviewMode) {
-      const preview = sortDisciplines([
-        {
-          id: "disc-1",
-          centerId: "demo",
-          name: "Voley",
-          category: "monthly_fee",
-          modality: "Adultos",
-          baseAmount: 20000,
-          billingType: "monthly",
-          active: true,
-          allowPartial: true,
-          note: ""
-        },
-        {
-          id: "disc-2",
-          centerId: "demo",
-          name: "Danza",
-          category: "monthly_fee",
-          modality: "Kids",
-          baseAmount: 18000,
-          billingType: "monthly",
-          active: false,
-          allowPartial: true,
-          note: ""
-        }
-      ]);
-      setDisciplines(preview);
-      setStudentCountByDiscipline(new Map([["disc-1", 14], ["disc-2", 8]]));
-      setPotentialByDiscipline(new Map([["disc-1", 280000], ["disc-2", 144000]]));
+      setDisciplines(
+        sortDisciplines([
+          {
+            id: "disc-1",
+            name: "Freestyle",
+            billingType: "monthly_fee",
+            paymentMode: "monthly",
+            allowPartial: false,
+            price: 20000,
+            active: true,
+            note: ""
+          },
+          {
+            id: "disc-2",
+            name: "Indumentaria oficial",
+            billingType: "uniform",
+            paymentMode: "one_time",
+            allowPartial: true,
+            price: 12000,
+            active: false,
+            note: ""
+          }
+        ])
+      );
       return;
     }
 
-    if (!membership) return;
-    const snapshot = await loadAcademyBillingSnapshot(membership.academyId);
-    const activeEnrollments = snapshot.enrollments.filter((enrollment) => enrollment.active);
-
-    setDisciplines(sortDisciplines(snapshot.disciplines));
-    setStudentCountByDiscipline(
-      new Map(
-        snapshot.disciplines.map((discipline) => [
-          discipline.id,
-          activeEnrollments.filter((enrollment) => enrollment.disciplineId === discipline.id).length
-        ])
-      )
-    );
-    setPotentialByDiscipline(
-      new Map(
-        snapshot.disciplines.map((discipline) => [
-          discipline.id,
-          activeEnrollments
-            .filter((enrollment) => enrollment.disciplineId === discipline.id)
-            .reduce((sum, enrollment) => sum + (enrollment.customAmount ?? discipline.baseAmount), 0)
-        ])
-      )
-    );
+    if (!academyPath) return;
+    const snap = await getDocs(query(collection(db, `${academyPath}/disciplines`), orderBy("name", "asc")));
+    setDisciplines(sortDisciplines(snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<Discipline, "id">) }))));
   }
 
   useEffect(() => {
-    void loadData();
-  }, [isPreviewMode, membership?.academyId]);
+    void loadDisciplines();
+  }, [academyPath, isPreviewMode]);
 
   useEffect(() => {
     if (!isModalOpen) return;
+
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape") closeModal();
     }
+
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
   }, [isModalOpen]);
 
-  const activeCount = disciplines.filter((discipline) => discipline.active).length;
-  const averageBaseAmount = Math.round(
-    disciplines.reduce((sum, discipline) => sum + discipline.baseAmount, 0) / Math.max(disciplines.length, 1)
-  );
-  const potentialRevenue = [...potentialByDiscipline.values()].reduce((sum, value) => sum + value, 0);
-
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!membership || !canWriteAcademyData || isPreviewMode) return;
+    if (!academyPath || !canWriteAcademyData || isPreviewMode) return;
 
-    const academyId = membership.academyId;
-    const academyPath = `academies/${academyId}`;
-    const disciplineRef = editingId
-      ? doc(db, `${academyPath}/disciplines`, editingId)
-      : doc(collection(db, `${academyPath}/disciplines`));
+    const payload = {
+      name: form.name.trim(),
+      billingType: form.billingType,
+      paymentMode: form.paymentMode,
+      allowPartial: form.allowPartial,
+      price: Number(form.price),
+      active: editingId ? disciplines.find((discipline) => discipline.id === editingId)?.active ?? true : true,
+      note: form.note.trim(),
+      updatedAt: serverTimestamp()
+    };
 
-    await setDoc(
-      disciplineRef,
-      {
-        centerId: academyId,
-        name: form.name.trim(),
-        category: form.category,
-        modality: form.modality.trim(),
-        baseAmount: Number(form.baseAmount || 0),
-        feeBillingType: "monthly",
-        billingType: form.category,
-        paymentMode: "monthly",
-        price: Number(form.baseAmount || 0),
-        allowPartial: form.allowPartial,
-        active: editingId ? disciplines.find((discipline) => discipline.id === editingId)?.active ?? true : true,
-        note: form.note.trim(),
-        updatedAt: serverTimestamp(),
-        ...(editingId ? {} : { createdAt: serverTimestamp() })
-      },
-      { merge: true }
-    );
+    if (editingId) {
+      await updateDoc(doc(db, `${academyPath}/disciplines`, editingId), payload);
+    } else {
+      await addDoc(collection(db, `${academyPath}/disciplines`), {
+        ...payload,
+        createdAt: serverTimestamp()
+      });
+    }
 
     closeModal();
-    await loadData();
+    await loadDisciplines();
   }
 
-  async function handleToggleStatus(discipline: DisciplineRecord) {
-    if (!membership || !canWriteAcademyData || isPreviewMode) return;
-    await updateDoc(doc(db, `academies/${membership.academyId}/disciplines`, discipline.id), {
-      active: !discipline.active,
-      updatedAt: serverTimestamp()
-    });
-    await loadData();
+  async function handleToggleStatus(discipline: Discipline) {
+    if (!canWriteAcademyData || isPreviewMode) return;
+
+    const nextActive = !discipline.active;
+    if (academyPath) {
+      await updateDoc(doc(db, `${academyPath}/disciplines`, discipline.id), {
+        active: nextActive,
+        updatedAt: serverTimestamp()
+      });
+      await loadDisciplines();
+      return;
+    }
+
+    setDisciplines((prev) =>
+      sortDisciplines(prev.map((item) => (item.id === discipline.id ? { ...item, active: nextActive } : item)))
+    );
   }
 
   function openCreateModal() {
@@ -184,15 +173,15 @@ export function DisciplinesPage() {
     setIsModalOpen(true);
   }
 
-  function handleEdit(discipline: DisciplineRecord) {
+  function handleEdit(discipline: Discipline) {
     setEditingId(discipline.id);
     setForm({
       name: discipline.name,
-      category: discipline.category,
-      modality: discipline.modality,
-      baseAmount: String(discipline.baseAmount),
-      allowPartial: discipline.allowPartial,
-      note: discipline.note
+      billingType: discipline.billingType,
+      paymentMode: discipline.paymentMode ?? (discipline.billingType === "monthly_fee" ? "monthly" : "one_time"),
+      allowPartial: Boolean(discipline.allowPartial),
+      price: String(discipline.price),
+      note: discipline.note ?? ""
     });
     setIsModalOpen(true);
   }
@@ -218,20 +207,16 @@ export function DisciplinesPage() {
           </button>
         }
       >
-        <div className="mb-4 grid gap-3 rounded-brand border border-[rgba(0,209,255,0.15)] bg-[#0B0F1A] p-4 lg:grid-cols-4">
-          <InfoCard label="Activas" value={String(activeCount)} accent="text-[#22C55E]" />
-          <InfoCard label="Valor base promedio" value={`$${averageBaseAmount}`} accent="text-[#00D1FF]" />
-          <InfoCard label="Ingreso potencial" value={`$${potentialRevenue}`} accent="text-[#F5F7FB]" />
-          <InfoCard label="Modelo" value="Mensual" accent="text-[#9FB0D0]" />
-        </div>
-
         <div className="space-y-3 md:hidden">
           {disciplines.map((discipline) => (
-            <article key={discipline.id} className={`rounded-brand border border-slate-800 bg-bg p-4 ${discipline.active ? "" : "opacity-80"}`}>
+            <article
+              key={discipline.id}
+              className={`rounded-brand border border-slate-800 bg-bg p-4 ${discipline.active ? "" : "opacity-80"}`}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="font-semibold text-text">{discipline.name}</p>
-                  <p className="text-sm text-muted">{discipline.modality || formatBillingType(discipline.category)}</p>
+                  <p className="text-sm text-muted">{categoryLabels[discipline.billingType]}</p>
                 </div>
                 <button
                   type="button"
@@ -248,10 +233,12 @@ export function DisciplinesPage() {
               </div>
 
               <div className="mt-3 grid gap-2 text-sm text-muted">
-                <MobileInfo label="Categoria" value={categoryLabels[discipline.category]} />
-                <MobileInfo label="Valor base" value={`$${discipline.baseAmount}`} />
-                <MobileInfo label="Alumnos asociados" value={String(studentCountByDiscipline.get(discipline.id) ?? 0)} />
-                <MobileInfo label="Ingreso estimado" value={`$${potentialByDiscipline.get(discipline.id) ?? 0}`} />
+                <MobileInfo
+                  label="Modalidad"
+                  value={paymentModeLabels[discipline.paymentMode ?? (discipline.billingType === "monthly_fee" ? "monthly" : "one_time")]}
+                />
+                <MobileInfo label="Valor base" value={`$${discipline.price}`} />
+                <MobileInfo label="Pagos" value={discipline.allowPartial ? "Permite entregas" : "Pago completo"} />
               </div>
 
               <div className="mt-4">
@@ -268,16 +255,15 @@ export function DisciplinesPage() {
           ))}
           {disciplines.length === 0 && <p className="text-sm text-muted">Todavia no hay disciplinas cargadas.</p>}
         </div>
-
         <div className="hidden overflow-x-auto md:block">
           <table className="min-w-full text-sm">
             <thead className="text-left text-muted">
               <tr>
                 <th className="px-3 py-2">Nombre</th>
+                <th className="px-3 py-2">Categoria</th>
                 <th className="px-3 py-2">Modalidad</th>
                 <th className="px-3 py-2">Valor base</th>
-                <th className="px-3 py-2">Alumnos</th>
-                <th className="px-3 py-2">Ingreso potencial</th>
+                <th className="px-3 py-2">Pagos</th>
                 <th className="px-3 py-2">Estado</th>
                 <th className="px-3 py-2">Accion</th>
               </tr>
@@ -285,14 +271,13 @@ export function DisciplinesPage() {
             <tbody>
               {disciplines.map((discipline) => (
                 <tr key={discipline.id} className={`border-t border-slate-800 ${discipline.active ? "" : "opacity-80"}`}>
-                  <td className="px-3 py-3">
-                    <p className="font-medium text-text">{discipline.name}</p>
-                    <p className="text-xs text-muted">{categoryLabels[discipline.category]}</p>
+                  <td className="px-3 py-3">{discipline.name}</td>
+                  <td className="px-3 py-3 text-muted">{categoryLabels[discipline.billingType]}</td>
+                  <td className="px-3 py-3 text-muted">
+                    {paymentModeLabels[discipline.paymentMode ?? (discipline.billingType === "monthly_fee" ? "monthly" : "one_time")]}
                   </td>
-                  <td className="px-3 py-3 text-muted">{discipline.modality || "Mensual"}</td>
-                  <td className="px-3 py-3 font-semibold text-primary">${discipline.baseAmount}</td>
-                  <td className="px-3 py-3 text-muted">{studentCountByDiscipline.get(discipline.id) ?? 0}</td>
-                  <td className="px-3 py-3 text-muted">${potentialByDiscipline.get(discipline.id) ?? 0}</td>
+                  <td className="px-3 py-3 text-primary">${discipline.price}</td>
+                  <td className="px-3 py-3 text-muted">{discipline.allowPartial ? "Permite entregas" : "Pago completo"}</td>
                   <td className="px-3 py-3">
                     <button
                       type="button"
@@ -321,7 +306,7 @@ export function DisciplinesPage() {
               ))}
               {disciplines.length === 0 && (
                 <tr>
-                  <td className="px-3 py-3 text-muted" colSpan={7}>
+                  <td className="px-3 py-3 text-muted" colSpan={6}>
                     Todavia no hay disciplinas cargadas.
                   </td>
                 </tr>
@@ -345,7 +330,7 @@ export function DisciplinesPage() {
                   {editingId ? "Editar disciplina" : "Nueva disciplina"}
                 </h2>
                 <p className="mt-1 text-xs text-muted">
-                  El cambio de valor base se aplicara a nuevas cuotas. No modifica periodos ya generados.
+                  Completa los datos sin perder de vista el listado principal.
                 </p>
               </div>
               <button
@@ -362,8 +347,10 @@ export function DisciplinesPage() {
               <label className="grid gap-1">
                 Categoria
                 <select
-                  value={form.category}
-                  onChange={(event) => setForm((prev) => ({ ...prev, category: event.target.value as FeeCategory }))}
+                  value={form.billingType}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, billingType: event.target.value as FeeCategory }))
+                  }
                   className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
                 >
                   {Object.entries(categoryLabels).map(([value, label]) => (
@@ -373,32 +360,63 @@ export function DisciplinesPage() {
                   ))}
                 </select>
               </label>
-              <Field label="Modalidad" required={false} value={form.modality} onChange={(value) => setForm((prev) => ({ ...prev, modality: value }))} />
-              <Field label="Valor base" type="number" value={form.baseAmount} onChange={(value) => setForm((prev) => ({ ...prev, baseAmount: value }))} />
+              <label className="grid gap-1">
+                Modalidad
+                <select
+                  value={form.paymentMode}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, paymentMode: event.target.value as FeePaymentMode }))
+                  }
+                  className="rounded-brand border border-slate-600 bg-bg px-3 py-2 outline-none focus:border-primary"
+                >
+                  {Object.entries(paymentModeLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Field
+                label="Valor base"
+                type="number"
+                value={form.price}
+                onChange={(value) => setForm((prev) => ({ ...prev, price: value }))}
+              />
               <label className="flex items-center justify-between gap-3 rounded-brand border border-slate-700 bg-bg px-3 py-3 text-sm text-muted">
-                <span>Permitir pagos parciales</span>
+                <span>Permitir pagos parciales o entregas</span>
                 <input
                   type="checkbox"
                   checked={form.allowPartial}
                   onChange={(event) => setForm((prev) => ({ ...prev, allowPartial: event.target.checked }))}
                 />
               </label>
-              <Field label="Nota interna" required={false} value={form.note} onChange={(value) => setForm((prev) => ({ ...prev, note: value }))} />
-
+              <Field
+                label="Nota"
+                value={form.note}
+                onChange={(value) => setForm((prev) => ({ ...prev, note: value }))}
+                required={false}
+              />
+              {editingId && (
+                <div className="rounded-brand border border-slate-700 bg-bg px-3 py-2">
+                  <p className="text-xs uppercase text-muted">Estado actual</p>
+                  <p className={`mt-1 text-sm font-semibold ${disciplines.find((discipline) => discipline.id === editingId)?.active ? "text-secondary" : "text-danger"}`}>
+                    {disciplines.find((discipline) => discipline.id === editingId)?.active ? "Activa" : "Inactiva"}
+                  </p>
+                </div>
+              )}
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={closeModal} className="rounded-brand border border-slate-600 px-3 py-2 text-muted">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="rounded-brand border border-slate-600 px-3 py-2 text-muted"
+                >
                   Cancelar
                 </button>
-<<<<<<< HEAD
                 <button
                   disabled={!canWriteAcademyData || isPreviewMode}
                   className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40"
                 >
                   {editingId ? "Guardar cambios" : "Crear disciplina"}
-=======
-                <button disabled={!canWriteAcademyData || isPreviewMode} className="rounded-brand bg-primary px-3 py-2 font-semibold text-bg disabled:opacity-40">
-                  {isPreviewMode ? "Modo demo" : editingId ? "Guardar cambios" : "Crear disciplina"}
->>>>>>> 9718ee6041c9a04af9bc6e63bfefc204bb2b073d
                 </button>
               </div>
             </form>
@@ -414,15 +432,6 @@ function MobileInfo({ label, value }: { label: string; value: string }) {
     <div className="grid gap-1">
       <p className="text-[11px] uppercase tracking-wide text-muted">{label}</p>
       <p className="break-words text-text">{value}</p>
-    </div>
-  );
-}
-
-function InfoCard({ label, value, accent }: { label: string; value: string; accent: string }) {
-  return (
-    <div className="rounded-brand border border-[rgba(0,209,255,0.12)] bg-[#121A2B] p-3">
-      <p className="text-[11px] uppercase tracking-wide text-[#9FB0D0]">{label}</p>
-      <p className={`mt-2 text-lg font-semibold ${accent}`}>{value}</p>
     </div>
   );
 }

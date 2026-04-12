@@ -10,7 +10,9 @@ import { auth, db, functions } from "../../lib/firebase";
 import {
   DEFAULT_PLATFORM_CONFIG,
   getPlanDescription,
+  getPlanHighlight,
   getPlanLabel,
+  getPlanLimit,
   getPlanPrice,
   normalizePlatformConfig,
   type PlatformConfig
@@ -228,9 +230,11 @@ export function AuthEntryPanel({
 
   const registerRouteCta = "Todavia no usas PaySync? Probalo gratis";
   const compactEmbeddedRegister = embedded && mode === "register";
+  const contentWidthClass = mode === "register" ? "max-w-2xl" : "max-w-md";
+  const selectedPlanLimit = getPlanLimit(platformConfig, registerForm.plan);
 
   return (
-    <div className={`relative ${embedded ? "w-full" : "w-full max-w-5xl"}`}>
+    <div className={`relative ${embedded ? "w-full" : "w-full max-w-6xl"}`}>
       {registerSubmitting && (
         <div className="absolute inset-0 z-20 flex items-center justify-center rounded-[28px] bg-slate-950/88 px-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-[26px] border border-slate-700/80 bg-surface p-4 shadow-soft">
@@ -251,14 +255,14 @@ export function AuthEntryPanel({
       )}
 
       <div
-        className={`overflow-hidden rounded-[24px] border border-white/10 bg-[#1A1A1A] shadow-soft ${
+        className={`overflow-hidden rounded-[28px] border border-white/10 bg-[#161616] shadow-soft ${
           embedded
             ? "max-h-[calc(100vh-1.5rem)] overflow-y-auto overscroll-contain"
-            : "lg:grid lg:grid-cols-[0.9fr_1.1fr]"
+            : "lg:grid lg:grid-cols-[minmax(320px,0.92fr)_minmax(0,1.08fr)]"
         }`}
       >
         <aside
-          className={`border-b border-white/10 bg-[linear-gradient(180deg,#111111_0%,#0B0B0B_100%)] p-5 sm:p-6 lg:border-b-0 lg:border-r ${
+          className={`border-b border-white/10 bg-[linear-gradient(180deg,#111111_0%,#0B0B0B_100%)] p-6 sm:p-7 lg:flex lg:min-h-full lg:flex-col lg:justify-center lg:border-b-0 lg:border-r lg:p-8 ${
             compactEmbeddedRegister ? "hidden lg:block" : ""
           }`}
         >
@@ -304,23 +308,23 @@ export function AuthEntryPanel({
           )}
         </aside>
 
-        <section className={`bg-[#1A1A1A] p-4 sm:p-5 lg:p-6 ${embedded ? "overflow-y-auto" : ""}`}>
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <section className={`bg-[#161616] p-5 sm:p-6 lg:p-8 ${embedded ? "overflow-y-auto" : ""}`}>
+          <div className={`mx-auto flex w-full flex-col gap-4 sm:flex-row sm:items-center sm:justify-between ${embedded ? "" : contentWidthClass}`}>
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#B3B3B3]">Acceso</p>
               <h1 className={`mt-2 font-display leading-tight text-white ${compactEmbeddedRegister ? "text-[1.55rem] sm:text-[1.75rem]" : "text-[1.9rem]"}`}>
                 {mode === "register" ? "Crea tu academia y empeza a cobrar mejor hoy" : "Entra y mira quien te debe hoy"}
               </h1>
             </div>
-            <div className="grid grid-cols-2 gap-2 rounded-[16px] border border-white/10 bg-[#0B0B0B] p-1">
+            <div className="grid grid-cols-2 gap-2 rounded-[16px] border border-white/10 bg-[#0B0B0B] p-1 sm:min-w-[220px]">
               <ToggleButton label="Ingresar" active={mode === "login"} onClick={() => setMode("login")} />
               <ToggleButton label="Registro" active={mode === "register"} onClick={() => setMode("register")} />
             </div>
           </div>
 
           {mode === "login" ? (
-            <form onSubmit={handleLoginSubmit} autoComplete="off" className="mt-6 grid gap-5">
-              <div className="grid gap-4">
+            <form onSubmit={handleLoginSubmit} autoComplete="off" className="mx-auto mt-6 grid w-full max-w-md gap-5">
+              <div className="grid gap-4 rounded-[20px] border border-white/10 bg-[#0F0F0F] p-4 sm:p-5">
                 <Field
                   label="Email"
                   type="email"
@@ -370,7 +374,7 @@ export function AuthEntryPanel({
               </div>
             </form>
           ) : (
-            <form onSubmit={handleRegisterSubmit} autoComplete="off" className={`mt-6 grid ${compactEmbeddedRegister ? "gap-4" : "gap-5"}`}>
+            <form onSubmit={handleRegisterSubmit} autoComplete="off" className={`mx-auto mt-6 grid w-full max-w-2xl ${compactEmbeddedRegister ? "gap-4" : "gap-5"}`}>
               <div className={`rounded-[20px] border border-primary/30 bg-gradient-to-br from-primary/12 via-primary/5 to-[#0B0B0B] text-sm text-[#B3B3B3] shadow-soft ${compactEmbeddedRegister ? "p-3.5" : "p-4"}`}>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Prueba gratis</p>
                 <p className={`mt-2 font-semibold text-white ${compactEmbeddedRegister ? "text-[0.98rem] leading-6 sm:text-base" : "text-base leading-7 sm:text-lg"}`}>
@@ -380,7 +384,7 @@ export function AuthEntryPanel({
               </div>
 
               <div className={`grid ${compactEmbeddedRegister ? "gap-4" : "gap-5"}`}>
-                <div className={`grid gap-4 rounded-[20px] border border-white/10 bg-[#0B0B0B] ${compactEmbeddedRegister ? "p-3.5 sm:p-4" : "p-4 sm:p-5"}`}>
+                <div className={`grid gap-4 rounded-[20px] border border-white/10 bg-[#0F0F0F] ${compactEmbeddedRegister ? "p-3.5 sm:p-4" : "p-4 sm:p-5"}`}>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Tu academia</p>
                     <p className="mt-1 text-sm text-[#B3B3B3]">Configuracion inicial en menos de 1 minuto</p>
@@ -403,9 +407,17 @@ export function AuthEntryPanel({
                       }))}
                     />
                   </div>
+                  <div className="rounded-[16px] border border-primary/20 bg-primary/8 px-4 py-3 text-sm text-[#B3B3B3]">
+                    <p className="font-medium text-white">
+                      {selectedPlanLimit === null
+                        ? "Este plan permite alumnos ilimitados."
+                        : `Este plan permite hasta ${selectedPlanLimit} alumnos activos.`}
+                    </p>
+                    <p className="mt-1">{getPlanHighlight(platformConfig, registerForm.plan)}</p>
+                  </div>
                 </div>
 
-                <div className={`grid gap-4 rounded-[20px] border border-white/10 bg-[#0B0B0B] ${compactEmbeddedRegister ? "p-3.5 sm:p-4" : "p-4 sm:p-5"}`}>
+                <div className={`grid gap-4 rounded-[20px] border border-white/10 bg-[#0F0F0F] ${compactEmbeddedRegister ? "p-3.5 sm:p-4" : "p-4 sm:p-5"}`}>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-secondary">Tus datos</p>
                     <p className="mt-1 text-sm text-[#B3B3B3]">Completa tus datos para entrar y administrar tu academia.</p>
@@ -436,7 +448,7 @@ export function AuthEntryPanel({
                 </div>
               </div>
 
-              <div className={`grid gap-4 rounded-[20px] border border-white/10 bg-[#0B0B0B] ${compactEmbeddedRegister ? "p-3.5 sm:p-4" : "p-4 sm:p-5"}`}>
+              <div className={`grid gap-4 rounded-[20px] border border-white/10 bg-[#0F0F0F] ${compactEmbeddedRegister ? "p-3.5 sm:p-4" : "p-4 sm:p-5"}`}>
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Acceso</p>
                   <p className="mt-1 text-sm text-[#B3B3B3]">Usa una contrasena segura</p>
@@ -466,6 +478,9 @@ export function AuthEntryPanel({
                   Plan seleccionado: <span className="font-semibold text-white">{getPlanLabel(platformConfig, registerForm.plan)}</span>
                 </p>
                 <p className="mt-1">{getPlanDescription(platformConfig, registerForm.plan)}</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.18em] text-primary">
+                  {selectedPlanLimit === null ? "Alumnos ilimitados" : `Hasta ${selectedPlanLimit} alumnos activos`}
+                </p>
               </div>
 
               {registerError && (
