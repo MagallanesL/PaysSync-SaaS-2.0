@@ -303,11 +303,30 @@ async function mercadoPagoRequest<T>(path: string, init: RequestInit) {
 
   if (!response.ok) {
     const responseText = await response.text();
+    let parsedResponse: { code?: string; message?: string; blocked_by?: string; status?: number } | null = null;
+    try {
+      parsedResponse = JSON.parse(responseText) as { code?: string; message?: string; blocked_by?: string; status?: number };
+    } catch {
+      parsedResponse = null;
+    }
+
     logger.error("Mercado Pago request failed", {
       path,
       status: response.status,
       responseText
     });
+
+    if (response.status === 401) {
+      throw new HttpsError("failed-precondition", "La credencial de Mercado Pago no es valida o ya no tiene acceso.");
+    }
+
+    if (response.status === 403 && parsedResponse?.code === "PA_UNAUTHORIZED_RESULT_FROM_POLICIES") {
+      throw new HttpsError(
+        "failed-precondition",
+        "Mercado Pago rechazo la cuenta por politicas de seguridad. Revisa en tu panel de Mercado Pago que la cuenta este habilitada para cobrar y que el Access Token corresponda a esa cuenta."
+      );
+    }
+
     throw new HttpsError("internal", "No se pudo completar la operacion con Mercado Pago.");
   }
 

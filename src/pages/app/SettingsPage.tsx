@@ -244,7 +244,14 @@ export function SettingsPage() {
 
       window.location.assign(initPoint);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo iniciar el checkout de Mercado Pago.";
+      const firebaseMessage =
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error &&
+        typeof (error as { message?: unknown }).message === "string"
+          ? (error as { message: string }).message
+          : null;
+      const message = firebaseMessage || (error instanceof Error ? error.message : "No se pudo iniciar el checkout de Mercado Pago.");
       setCheckoutError(message);
     } finally {
       setCheckoutLoadingPlan(null);
