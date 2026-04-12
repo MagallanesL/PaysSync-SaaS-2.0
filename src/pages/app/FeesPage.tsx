@@ -576,6 +576,10 @@ export function FeesPage() {
     setIsModalOpen(false);
   }
 
+  const hasFees = fees.length > 0;
+  const hasStudents = students.length > 0;
+  const hasAssignedDisciplines = students.some((student) => (student.disciplines?.length ?? 0) > 0);
+
   return (
     <>
       <Panel title="Cuotas">
@@ -586,20 +590,22 @@ export function FeesPage() {
           </p>
         </div>
 
-        <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
-          <Summary label="Vencidas" value={stats.overdue} color="text-danger" />
-          <Summary label="Por vencer" value={stats.upcoming} color="text-warning" />
-          <Summary label="Parciales" value={stats.partial} color="text-primary" />
-          <Summary label="Saldo pendiente" value={`$${stats.pendingBalance}`} color="text-danger" />
-        </div>
+        {hasFees ? (
+          <>
+            <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
+              <Summary label="Vencidas" value={stats.overdue} color="text-danger" />
+              <Summary label="Por vencer" value={stats.upcoming} color="text-warning" />
+              <Summary label="Parciales" value={stats.partial} color="text-primary" />
+              <Summary label="Saldo pendiente" value={`$${stats.pendingBalance}`} color="text-danger" />
+            </div>
 
-        <div className="mb-3 flex flex-wrap gap-3 text-xs text-muted">
-          <span>En seguimiento: {stats.visible}</span>
-          <span>Total de cuotas: {stats.total}</span>
-          <span>Orden: mas dias de mora primero</span>
-        </div>
+            <div className="mb-3 flex flex-wrap gap-3 text-xs text-muted">
+              <span>En seguimiento: {stats.visible}</span>
+              <span>Total de cuotas: {stats.total}</span>
+              <span>Orden: mas dias de mora primero</span>
+            </div>
 
-        <div className="space-y-3 xl:hidden">
+            <div className="space-y-3 xl:hidden">
           {trackingRows.map((fee) => (
             <article key={fee.id} className="rounded-brand border border-slate-800 bg-bg p-4">
               <div className="flex items-start justify-between gap-3">
@@ -664,90 +670,103 @@ export function FeesPage() {
           {trackingRows.length === 0 && (
             <p className="text-sm text-muted">No hay cuotas para seguir dentro de los proximos 15 dias.</p>
           )}
-        </div>
-        <div className="hidden xl:block">
-          <table className="min-w-full table-fixed text-xs 2xl:text-sm">
-            <thead className="text-left text-muted">
-              <tr>
-                <th className="w-[10%] px-2 py-2">Prioridad</th>
-                <th className="w-[12%] px-2 py-2">Alumno</th>
-                <th className="w-[20%] px-2 py-2">Concepto</th>
-                <th className="w-[9%] px-2 py-2">Modalidad</th>
-                <th className="w-[8%] px-2 py-2">Total</th>
-                <th className="w-[8%] px-2 py-2">Entregado</th>
-                <th className="w-[8%] px-2 py-2">Saldo</th>
-                <th className="w-[9%] px-2 py-2">Vencimiento</th>
-                <th className="w-[7%] px-2 py-2">Estado</th>
-                <th className="w-[4%] px-2 py-2 text-center">WhatsApp</th>
-                <th className="w-[5%] px-2 py-2 text-right">Accion</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trackingRows.map((fee) => {
-                return (
-                  <tr key={fee.id} className="border-t border-slate-800">
-                    <td className="px-2 py-3 align-top">
-                      <PriorityBadge daysLeft={fee.daysLeft} daysOverdue={fee.daysOverdue} />
-                    </td>
-                    <td className="px-2 py-3 align-top text-muted">{fee.studentName}</td>
-                    <td className="px-2 py-3 align-top">
-                      <p className="font-medium text-text">{fee.disciplineName ?? fee.observation ?? fee.concept}</p>
-                      <p className="text-xs text-muted">
-                        {fee.period ? `Periodo ${formatPeriodLabel(fee.period)}` : fee.concept}
-                      </p>
-                    </td>
-                    <td className="px-2 py-3 align-top text-muted">
-                      {fee.paymentMode === "monthly"
-                        ? "Mensual"
-                        : fee.partialAllowed
-                          ? "Entrega parcial"
-                          : "Cargo unico"}
-                    </td>
-                    <td className="px-2 py-3 align-top font-semibold text-primary">${fee.amount}</td>
-                    <td className="px-2 py-3 align-top text-secondary">${fee.paidAmount}</td>
-                    <td className="px-2 py-3 align-top font-semibold text-warning">${fee.balance}</td>
-                    <td className="px-2 py-3 align-top text-muted">{fee.dueDate}</td>
-                    <td className="px-2 py-3 align-top">
-                      <StatusBadge status={fee.status} />
-                    </td>
-                    <td className="px-2 py-3 align-top text-center">
-                      {fee.whatsappUrl ? (
-                        <a
-                          href={fee.whatsappUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-label={`Enviar WhatsApp a ${fee.studentName}`}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-secondary/15 text-secondary transition hover:bg-secondary/25"
-                        >
-                          <WhatsAppIcon />
-                        </a>
-                      ) : (
-                        <span className="text-xs text-muted">Sin aviso</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-3 align-top text-right">
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(fee)}
-                        disabled={!canWriteAcademyData || isPreviewMode}
-                        className="rounded-brand bg-primary/15 px-2 py-1 text-[11px] font-semibold text-primary transition hover:bg-primary hover:text-bg disabled:opacity-40"
-                      >
-                        Registrar pago
-                      </button>
-                    </td>
+            </div>
+            <div className="hidden xl:block">
+              <table className="min-w-full table-fixed text-xs 2xl:text-sm">
+                <thead className="text-left text-muted">
+                  <tr>
+                    <th className="w-[10%] px-2 py-2">Prioridad</th>
+                    <th className="w-[12%] px-2 py-2">Alumno</th>
+                    <th className="w-[20%] px-2 py-2">Concepto</th>
+                    <th className="w-[9%] px-2 py-2">Modalidad</th>
+                    <th className="w-[8%] px-2 py-2">Total</th>
+                    <th className="w-[8%] px-2 py-2">Entregado</th>
+                    <th className="w-[8%] px-2 py-2">Saldo</th>
+                    <th className="w-[9%] px-2 py-2">Vencimiento</th>
+                    <th className="w-[7%] px-2 py-2">Estado</th>
+                    <th className="w-[4%] px-2 py-2 text-center">WhatsApp</th>
+                    <th className="w-[5%] px-2 py-2 text-right">Accion</th>
                   </tr>
-                );
-              })}
-              {trackingRows.length === 0 && (
-                <tr>
-                  <td className="px-3 py-3 text-muted" colSpan={11}>
-                    No hay cuotas para seguir dentro de los proximos 15 dias.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {trackingRows.map((fee) => {
+                    return (
+                      <tr key={fee.id} className="border-t border-slate-800">
+                        <td className="px-2 py-3 align-top">
+                          <PriorityBadge daysLeft={fee.daysLeft} daysOverdue={fee.daysOverdue} />
+                        </td>
+                        <td className="px-2 py-3 align-top text-muted">{fee.studentName}</td>
+                        <td className="px-2 py-3 align-top">
+                          <p className="font-medium text-text">{fee.disciplineName ?? fee.observation ?? fee.concept}</p>
+                          <p className="text-xs text-muted">
+                            {fee.period ? `Periodo ${formatPeriodLabel(fee.period)}` : fee.concept}
+                          </p>
+                        </td>
+                        <td className="px-2 py-3 align-top text-muted">
+                          {fee.paymentMode === "monthly"
+                            ? "Mensual"
+                            : fee.partialAllowed
+                              ? "Entrega parcial"
+                              : "Cargo unico"}
+                        </td>
+                        <td className="px-2 py-3 align-top font-semibold text-primary">${fee.amount}</td>
+                        <td className="px-2 py-3 align-top text-secondary">${fee.paidAmount}</td>
+                        <td className="px-2 py-3 align-top font-semibold text-warning">${fee.balance}</td>
+                        <td className="px-2 py-3 align-top text-muted">{fee.dueDate}</td>
+                        <td className="px-2 py-3 align-top">
+                          <StatusBadge status={fee.status} />
+                        </td>
+                        <td className="px-2 py-3 align-top text-center">
+                          {fee.whatsappUrl ? (
+                            <a
+                              href={fee.whatsappUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label={`Enviar WhatsApp a ${fee.studentName}`}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-secondary/15 text-secondary transition hover:bg-secondary/25"
+                            >
+                              <WhatsAppIcon />
+                            </a>
+                          ) : (
+                            <span className="text-xs text-muted">Sin aviso</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-3 align-top text-right">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(fee)}
+                            disabled={!canWriteAcademyData || isPreviewMode}
+                            className="rounded-brand bg-primary/15 px-2 py-1 text-[11px] font-semibold text-primary transition hover:bg-primary hover:text-bg disabled:opacity-40"
+                          >
+                            Registrar pago
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {trackingRows.length === 0 && (
+                    <tr>
+                      <td className="px-3 py-3 text-muted" colSpan={11}>
+                        No hay cuotas para seguir dentro de los proximos 15 dias.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <EmptyState
+            title="Todavia no hay cuotas generadas"
+            description={
+              !hasStudents
+                ? "Primero crea al menos un alumno. Cuando empieces a cargar alumnos y sus disciplinas, aqui vas a poder seguir pagos, saldos y vencimientos."
+                : !hasAssignedDisciplines
+                  ? "Todavia no hay disciplinas asignadas a alumnos activos. En cuanto asignes una disciplina con valor, las cuotas apareceran automaticamente aqui."
+                  : "Aun no se genero ninguna cuota visible. Revisa que los alumnos esten activos y que sus disciplinas tengan modalidad y valor configurados."
+            }
+          />
+        )}
       </Panel>
 
       {isModalOpen && editingFee && (
@@ -858,6 +877,15 @@ export function FeesPage() {
         </div>
       )}
     </>
+  );
+}
+
+function EmptyState({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-brand border border-dashed border-slate-700 bg-bg/70 px-5 py-10 text-center">
+      <p className="font-display text-lg text-text">{title}</p>
+      <p className="mx-auto mt-2 max-w-2xl text-sm text-muted">{description}</p>
+    </div>
   );
 }
 

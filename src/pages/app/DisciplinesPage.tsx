@@ -192,6 +192,8 @@ export function DisciplinesPage() {
     setIsModalOpen(false);
   }
 
+  const hasDisciplines = disciplines.length > 0;
+
   return (
     <>
       <Panel
@@ -207,83 +209,24 @@ export function DisciplinesPage() {
           </button>
         }
       >
-        <div className="space-y-3 md:hidden">
-          {disciplines.map((discipline) => (
-            <article
-              key={discipline.id}
-              className={`rounded-brand border border-slate-800 bg-bg p-4 ${discipline.active ? "" : "opacity-80"}`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-semibold text-text">{discipline.name}</p>
-                  <p className="text-sm text-muted">{categoryLabels[discipline.billingType]}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handleToggleStatus(discipline)}
-                  disabled={!canWriteAcademyData || isPreviewMode}
-                  className={`shrink-0 rounded-brand px-2 py-1 text-xs font-semibold transition disabled:opacity-40 ${
-                    discipline.active
-                      ? "bg-secondary/15 text-secondary hover:bg-secondary/25"
-                      : "bg-danger/15 text-danger hover:bg-danger/25"
-                  }`}
-                >
-                  {discipline.active ? "Activa" : "Inactiva"}
-                </button>
-              </div>
-
-              <div className="mt-3 grid gap-2 text-sm text-muted">
-                <MobileInfo
-                  label="Modalidad"
-                  value={paymentModeLabels[discipline.paymentMode ?? (discipline.billingType === "monthly_fee" ? "monthly" : "one_time")]}
-                />
-                <MobileInfo label="Valor base" value={`$${discipline.price}`} />
-                <MobileInfo label="Pagos" value={discipline.allowPartial ? "Permite entregas" : "Pago completo"} />
-              </div>
-
-              <div className="mt-4">
-                <button
-                  type="button"
-                  onClick={() => handleEdit(discipline)}
-                  disabled={!canWriteAcademyData || isPreviewMode}
-                  className="w-full rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
-                >
-                  Editar
-                </button>
-              </div>
-            </article>
-          ))}
-          {disciplines.length === 0 && <p className="text-sm text-muted">Todavia no hay disciplinas cargadas.</p>}
-        </div>
-        <div className="hidden overflow-x-auto md:block">
-          <table className="min-w-full text-sm">
-            <thead className="text-left text-muted">
-              <tr>
-                <th className="px-3 py-2">Nombre</th>
-                <th className="px-3 py-2">Categoria</th>
-                <th className="px-3 py-2">Modalidad</th>
-                <th className="px-3 py-2">Valor base</th>
-                <th className="px-3 py-2">Pagos</th>
-                <th className="px-3 py-2">Estado</th>
-                <th className="px-3 py-2">Accion</th>
-              </tr>
-            </thead>
-            <tbody>
+        {hasDisciplines ? (
+          <>
+            <div className="space-y-3 md:hidden">
               {disciplines.map((discipline) => (
-                <tr key={discipline.id} className={`border-t border-slate-800 ${discipline.active ? "" : "opacity-80"}`}>
-                  <td className="px-3 py-3">{discipline.name}</td>
-                  <td className="px-3 py-3 text-muted">{categoryLabels[discipline.billingType]}</td>
-                  <td className="px-3 py-3 text-muted">
-                    {paymentModeLabels[discipline.paymentMode ?? (discipline.billingType === "monthly_fee" ? "monthly" : "one_time")]}
-                  </td>
-                  <td className="px-3 py-3 text-primary">${discipline.price}</td>
-                  <td className="px-3 py-3 text-muted">{discipline.allowPartial ? "Permite entregas" : "Pago completo"}</td>
-                  <td className="px-3 py-3">
+                <article
+                  key={discipline.id}
+                  className={`rounded-brand border border-slate-800 bg-bg p-4 ${discipline.active ? "" : "opacity-80"}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-text">{discipline.name}</p>
+                      <p className="text-sm text-muted">{categoryLabels[discipline.billingType]}</p>
+                    </div>
                     <button
                       type="button"
                       onClick={() => void handleToggleStatus(discipline)}
                       disabled={!canWriteAcademyData || isPreviewMode}
-                      className={`rounded-brand px-2 py-1 text-xs font-semibold transition disabled:opacity-40 ${
+                      className={`shrink-0 rounded-brand px-2 py-1 text-xs font-semibold transition disabled:opacity-40 ${
                         discipline.active
                           ? "bg-secondary/15 text-secondary hover:bg-secondary/25"
                           : "bg-danger/15 text-danger hover:bg-danger/25"
@@ -291,29 +234,89 @@ export function DisciplinesPage() {
                     >
                       {discipline.active ? "Activa" : "Inactiva"}
                     </button>
-                  </td>
-                  <td className="px-3 py-3">
+                  </div>
+
+                  <div className="mt-3 grid gap-2 text-sm text-muted">
+                    <MobileInfo
+                      label="Modalidad"
+                      value={paymentModeLabels[discipline.paymentMode ?? (discipline.billingType === "monthly_fee" ? "monthly" : "one_time")]}
+                    />
+                    <MobileInfo label="Valor base" value={`$${discipline.price}`} />
+                    <MobileInfo label="Pagos" value={discipline.allowPartial ? "Permite entregas" : "Pago completo"} />
+                  </div>
+
+                  <div className="mt-4">
                     <button
                       type="button"
                       onClick={() => handleEdit(discipline)}
                       disabled={!canWriteAcademyData || isPreviewMode}
-                      className="rounded-brand border border-slate-600 px-2 py-1 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
+                      className="w-full rounded-brand border border-slate-600 px-3 py-2 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
                     >
                       Editar
                     </button>
-                  </td>
-                </tr>
+                  </div>
+                </article>
               ))}
-              {disciplines.length === 0 && (
-                <tr>
-                  <td className="px-3 py-3 text-muted" colSpan={6}>
-                    Todavia no hay disciplinas cargadas.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            </div>
+            <div className="hidden overflow-x-auto md:block">
+              <table className="min-w-full text-sm">
+                <thead className="text-left text-muted">
+                  <tr>
+                    <th className="px-3 py-2">Nombre</th>
+                    <th className="px-3 py-2">Categoria</th>
+                    <th className="px-3 py-2">Modalidad</th>
+                    <th className="px-3 py-2">Valor base</th>
+                    <th className="px-3 py-2">Pagos</th>
+                    <th className="px-3 py-2">Estado</th>
+                    <th className="px-3 py-2">Accion</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {disciplines.map((discipline) => (
+                    <tr key={discipline.id} className={`border-t border-slate-800 ${discipline.active ? "" : "opacity-80"}`}>
+                      <td className="px-3 py-3">{discipline.name}</td>
+                      <td className="px-3 py-3 text-muted">{categoryLabels[discipline.billingType]}</td>
+                      <td className="px-3 py-3 text-muted">
+                        {paymentModeLabels[discipline.paymentMode ?? (discipline.billingType === "monthly_fee" ? "monthly" : "one_time")]}
+                      </td>
+                      <td className="px-3 py-3 text-primary">${discipline.price}</td>
+                      <td className="px-3 py-3 text-muted">{discipline.allowPartial ? "Permite entregas" : "Pago completo"}</td>
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => void handleToggleStatus(discipline)}
+                          disabled={!canWriteAcademyData || isPreviewMode}
+                          className={`rounded-brand px-2 py-1 text-xs font-semibold transition disabled:opacity-40 ${
+                            discipline.active
+                              ? "bg-secondary/15 text-secondary hover:bg-secondary/25"
+                              : "bg-danger/15 text-danger hover:bg-danger/25"
+                          }`}
+                        >
+                          {discipline.active ? "Activa" : "Inactiva"}
+                        </button>
+                      </td>
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(discipline)}
+                          disabled={!canWriteAcademyData || isPreviewMode}
+                          className="rounded-brand border border-slate-600 px-2 py-1 text-xs text-muted hover:border-primary hover:text-primary disabled:opacity-40"
+                        >
+                          Editar
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <EmptyState
+            title="Todavia no hay disciplinas o servicios"
+            description="Crea una disciplina con su valor y modalidad de cobro. Cuando la tengas, aqui vas a ver el listado limpio y listo para asignar a alumnos."
+          />
+        )}
       </Panel>
 
       {isModalOpen && (
@@ -424,6 +427,15 @@ export function DisciplinesPage() {
         </div>
       )}
     </>
+  );
+}
+
+function EmptyState({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-brand border border-dashed border-slate-700 bg-bg/70 px-5 py-10 text-center">
+      <p className="font-display text-lg text-text">{title}</p>
+      <p className="mx-auto mt-2 max-w-2xl text-sm text-muted">{description}</p>
+    </div>
   );
 }
 
