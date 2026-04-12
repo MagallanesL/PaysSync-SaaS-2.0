@@ -2,6 +2,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AuthEntryPanel } from "../components/auth/AuthEntryPanel";
+import paysyncLogo from "../asset/logo_paysync.png";
 import { FinalCTA } from "../components/landing/FinalCTA";
 import { Hero } from "../components/landing/Hero";
 import { HowItWorks } from "../components/landing/HowItWorks";
@@ -47,9 +48,16 @@ export function MarketingLandingPage() {
       <div className="mx-auto max-w-7xl px-4 pb-28 pt-5 sm:px-6 lg:px-8 lg:pb-20">
         <header className="sticky top-0 z-30 mb-8 border-b border-white/5 bg-[#0B0B0B]/90 py-4 backdrop-blur">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-2xl font-semibold text-white">PaySync</p>
-              <p className="mt-1 text-sm text-[#B3B3B3]">Cobros mensuales claros para academias</p>
+            <div className="flex items-center gap-3">
+              <img
+                src={paysyncLogo}
+                alt="PaySync"
+                className="h-12 w-12 rounded-[14px] border border-white/10 bg-white/5 object-cover p-1"
+              />
+              <div>
+                <p className="text-2xl font-semibold text-white">PaySync</p>
+                <p className="mt-1 text-sm text-[#B3B3B3]">Cobros mensuales claros para academias</p>
+              </div>
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
