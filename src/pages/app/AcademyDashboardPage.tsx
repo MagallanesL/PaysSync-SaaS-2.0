@@ -16,6 +16,7 @@ import {
   resolveFeeStatus,
   type FeeStatus
 } from "../../lib/fees";
+import type { Academy } from "../../lib/types";
 
 interface Student {
   id: string;
@@ -55,10 +56,23 @@ export function AcademyDashboardPage() {
   const { membership, isPreviewMode } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [fees, setFees] = useState<Fee[]>([]);
+  const [academyInfo, setAcademyInfo] = useState<Pick<Academy, "name" | "plan" | "status" | "subscription" | "trial"> | null>(null);
 
   useEffect(() => {
     async function load() {
       if (isPreviewMode) {
+        setAcademyInfo({
+          name: "Centro Demo",
+          plan: "pro",
+          status: "active",
+          trial: { active: false },
+          subscription: {
+            billingStatus: "paid",
+            currentPeriod: "2026-04",
+            renewsAt: new Date(Date.now() + 25 * 24 * 60 * 60 * 1000),
+            lastPaidAt: new Date()
+          }
+        });
         setStudents([
           { id: "student-1", fullName: "Ana Perez", status: "active" },
           { id: "student-2", fullName: "Bruno Diaz", status: "active" },
@@ -111,6 +125,9 @@ export function AcademyDashboardPage() {
         getDocs(collection(db, `${academyPath}/students`)),
         getDocs(collection(db, `${academyPath}/fees`))
       ]);
+      if (academySnap.exists()) {
+        setAcademyInfo(academySnap.data() as Pick<Academy, "name" | "plan" | "status" | "subscription" | "trial">);
+      }
       const billingSettings = normalizeAcademyBillingSettings(academySnap.exists() ? academySnap.data().billingSettings : undefined);
       setStudents(
         studentsSnap.docs.map((docSnap) => ({
@@ -170,6 +187,43 @@ export function AcademyDashboardPage() {
   }, [fees, activeStudentIds, activeStudents]);
 
   const dashboardTitle = membership?.academyName ? `Resumen de ${membership.academyName}` : "Resumen del centro";
+  const subscriptionNotice = useMemo(() => {
+    if (!academyInfo) return null;
+    const renewsAt = academyInfo.subscription?.renewsAt;
+    const lastPaidAt = academyInfo.subscription?.lastPaidAt;
+    const renewsAtLabel = renewsAt ? formatDateValue(renewsAt) : null;
+    const lastPaidAtLabel = lastPaidAt ? formatDateValue(lastPaidAt) : null;
+
+    if (academyInfo.status === "trial") {
+      return {
+        title: "Version de prueba activa",
+        detail: "Todavia estas en prueba. Cuando pagues, el plan quedara activo por 1 mes y aqui veras la fecha de renovacion.",
+        tone: "warning" as const
+      };
+    }
+
+    if (academyInfo.subscription?.pendingPlan) {
+      return {
+        title: "Pago en proceso",
+        detail: "Estamos esperando la confirmacion del pago para activar tu mes de suscripcion.",
+        tone: "warning" as const
+      };
+    }
+
+    if (academyInfo.subscription?.billingStatus === "paid" && renewsAtLabel) {
+      return {
+        title: "Plan activo por 1 mes",
+        detail: `Tu suscripcion esta vigente hasta el ${renewsAtLabel}.${lastPaidAtLabel ? ` Ultimo pago: ${lastPaidAtLabel}.` : ""}`,
+        tone: "ok" as const
+      };
+    }
+
+    return {
+      title: "Sin vigencia mensual confirmada",
+      detail: "Todavia no vemos una suscripcion mensual activa para este centro.",
+      tone: "warning" as const
+    };
+  }, [academyInfo]);
   const collectionRate =
     summary.totalCollected + summary.totalPending > 0
       ? Math.round((summary.totalCollected / (summary.totalCollected + summary.totalPending)) * 100)
@@ -196,6 +250,13 @@ export function AcademyDashboardPage() {
           </div>
         }
       >
+        {subscriptionNotice ? (
+          <div className="mb-4 rounded-brand border border-slate-700 bg-bg px-4 py-3">
+            <p className={`text-sm font-semibold ${subscriptionNotice.tone === "ok" ? "text-secondary" : "text-warning"}`}>{subscriptionNotice.title}</p>
+            <p className="mt-1 text-sm text-muted">{subscriptionNotice.detail}</p>
+          </div>
+        ) : null}
+
         <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Stat title="Cobrado" value={`$${summary.totalCollected}`} color="text-secondary" />
           <Stat title="Saldo pendiente" value={`$${summary.totalPending}`} color="text-warning" />
@@ -248,6 +309,29 @@ export function AcademyDashboardPage() {
       </div>
     </div>
   );
+}
+
+function formatDateValue(value: unknown) {
+  const millis =
+    typeof value === "object" && value !== null && "toMillis" in value && typeof value.toMillis === "function"
+      ? value.toMillis()
+      : value instanceof Date
+        ? value.getTime()
+        : typeof value === "number"
+          ? value
+          : typeof value === "object" &&
+              value !== null &&
+              "seconds" in value &&
+              typeof (value as { seconds?: unknown }).seconds === "number"
+            ? (value as { seconds: number }).seconds * 1000
+            : null;
+
+  if (!millis) return "Sin fecha";
+  return new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  }).format(new Date(millis));
 }
 
 function Stat({ title, value, color }: { title: string; value: number | string; color: string }) {

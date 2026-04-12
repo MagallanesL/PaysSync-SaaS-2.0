@@ -22,7 +22,7 @@ import {
 import { getTrialEndsAtMillis } from "../../lib/trial";
 import type { Academy, AcademyPlan } from "../../lib/types";
 
-type AcademySettings = Pick<Academy, "name" | "plan" | "status" | "planLimits" | "trial" | "createdAt" | "billingSettings">;
+type AcademySettings = Pick<Academy, "name" | "plan" | "status" | "planLimits" | "trial" | "createdAt" | "billingSettings" | "subscription">;
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const SUPPORT_PHONE = "5492657716071";
@@ -97,6 +97,51 @@ function getLateFeeLabel(settings: AcademyBillingSettings) {
   if (!settings.lateFeeEnabled || settings.lateFeeValue <= 0) return "Sin recargo automatico";
   const value = settings.lateFeeType === "percent" ? `${settings.lateFeeValue}%` : `$${settings.lateFeeValue}`;
   return `${value} desde ${settings.lateFeeStartsAfterDays} dia${settings.lateFeeStartsAfterDays === 1 ? "" : "s"} de mora`;
+}
+
+function getSubscriptionSummary(settings: AcademySettings) {
+  const renewsAtMillis = toMillis(settings.subscription?.renewsAt);
+  const lastPaidAtMillis = toMillis(settings.subscription?.lastPaidAt);
+  const billingStatus = String(settings.subscription?.billingStatus ?? "").trim().toLowerCase();
+  const pendingPlan = String(settings.subscription?.pendingPlan ?? "").trim();
+
+  if (settings.status === "trial") {
+    return {
+      title: "Estas usando la version de prueba",
+      detail: "Cuando actives un plan, la suscripcion pasara a durar 1 mes y veras aqui la proxima renovacion.",
+      accent: "text-warning"
+    };
+  }
+
+  if (pendingPlan) {
+    return {
+      title: "Pago en revision",
+      detail: `Estamos esperando la confirmacion del plan ${pendingPlan}. Apenas se acredite, el centro quedara activo por 1 mes.`,
+      accent: "text-warning"
+    };
+  }
+
+  if (billingStatus === "paid" && renewsAtMillis) {
+    return {
+      title: "Plan activo por 1 mes",
+      detail: `Tu acceso esta activo hasta el ${formatDate(renewsAtMillis)}.${lastPaidAtMillis ? ` Ultimo pago: ${formatDate(lastPaidAtMillis)}.` : ""}`,
+      accent: "text-secondary"
+    };
+  }
+
+  if (renewsAtMillis) {
+    return {
+      title: "Suscripcion con renovacion",
+      detail: `La vigencia actual llega hasta el ${formatDate(renewsAtMillis)}.`,
+      accent: "text-primary"
+    };
+  }
+
+  return {
+    title: "Sin suscripcion activa",
+    detail: "Todavia no hay una vigencia mensual confirmada para este centro.",
+    accent: "text-warning"
+  };
 }
 
 type CreateCheckoutResult = {
@@ -191,6 +236,7 @@ export function SettingsPage() {
   }
 
   const trialSummary = settings.status === "trial" ? getTrialSummary(settings, platformConfig.trialDurationDays) : null;
+  const subscriptionSummary = getSubscriptionSummary(settings);
   const supportBaseLink = buildSupportLink(
     settings.name,
     profile?.displayName ?? "Owner",
@@ -296,6 +342,11 @@ export function SettingsPage() {
                   <InfoCard label="Plan actual" value={getPlanLabel(platformConfig, settings.plan)} accent="text-primary" />
                   <InfoCard label="Capacidad" value={usage.limit === null ? "Ilimitada" : usage.usageLabel} accent="text-secondary" />
                   <InfoCard label="Recargo" value={getLateFeeLabel(billingForm)} accent="text-warning" />
+                </div>
+
+                <div className="mt-4 rounded-brand border border-slate-700 bg-slate-950/30 p-4">
+                  <p className={`text-sm font-semibold ${subscriptionSummary.accent}`}>{subscriptionSummary.title}</p>
+                  <p className="mt-1 text-sm text-muted">{subscriptionSummary.detail}</p>
                 </div>
               </section>
 
@@ -476,6 +527,7 @@ export function SettingsPage() {
                     detail={`Vencimiento general el dia ${billingForm.defaultDueDay}. ${getLateFeeLabel(billingForm)}.`}
                     accent="text-warning"
                   />
+                  <SignalCard title={subscriptionSummary.title} detail={subscriptionSummary.detail} accent={subscriptionSummary.accent} />
                   {trialSummary ? (
                     <SignalCard title={trialSummary.title} detail={trialSummary.detail} accent={trialSummary.accent} />
                   ) : (
