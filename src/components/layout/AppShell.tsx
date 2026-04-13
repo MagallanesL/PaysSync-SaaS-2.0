@@ -45,7 +45,7 @@ function formatDate(value: unknown) {
 }
 
 export function AppShell() {
-  const { membership, profile, logout } = useAuth();
+  const { membership, profile, logout, academyAccess } = useAuth();
   const [academyInfo, setAcademyInfo] = useState<AcademyShellInfo | null>(null);
 
   useEffect(() => {
@@ -69,6 +69,15 @@ export function AppShell() {
 
   const subscriptionBadge = useMemo(() => {
     if (!academyInfo) return null;
+
+    if (academyAccess?.state === "grace_period") {
+      const graceEndsAtLabel = formatDate(academyAccess.graceEndsAtMillis);
+      return {
+        label: graceEndsAtLabel ? `Periodo de gracia hasta ${graceEndsAtLabel}` : "Periodo de gracia activo",
+        detail: "Tu suscripcion vencio, pero todavia tienes 2 dias extra para renovarla sin perder acceso.",
+        className: "border-warning/40 bg-warning/10 text-warning"
+      };
+    }
 
     if (academyInfo.status === "trial") {
       return {
@@ -100,7 +109,7 @@ export function AppShell() {
       detail: "Todavia no hay una suscripcion mensual confirmada.",
       className: "border-danger/40 bg-danger/10 text-danger"
     };
-  }, [academyInfo]);
+  }, [academyAccess, academyInfo]);
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#0B0F1A] text-[#F5F7FB]">

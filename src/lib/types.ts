@@ -2,6 +2,7 @@ export type PlatformRole = "root" | "user";
 export type AcademyRole = "owner" | "staff" | "viewer";
 export type MembershipStatus = "active" | "inactive" | "suspended";
 export type AcademyPlan = "basic" | "pro" | "premium";
+export type AcademyAccessState = "trial_active" | "trial_expired" | "active" | "grace_period" | "expired" | "blocked";
 
 export interface UserProfile {
   email: string;
@@ -17,6 +18,16 @@ export interface AcademyMembership {
   email: string;
   role: AcademyRole;
   status: MembershipStatus;
+}
+
+export interface AcademyAccess {
+  state: AcademyAccessState;
+  canAccessApp: boolean;
+  blockedVariant: "trial" | "renewal" | "blocked" | null;
+  trialEndsAtMillis: number | null;
+  renewsAtMillis: number | null;
+  graceEndsAtMillis: number | null;
+  hasPaidSubscription: boolean;
 }
 
 export interface Academy {

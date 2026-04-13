@@ -8,7 +8,6 @@ import {
   query,
   serverTimestamp,
   setDoc,
-  updateDoc,
   where
 } from "firebase/firestore";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
@@ -21,15 +20,16 @@ import {
   useState,
   type ReactNode
 } from "react";
+import { resolveAcademyAccess } from "../lib/academyAccess";
 import { auth, db } from "../lib/firebase";
 import { DEFAULT_PLATFORM_CONFIG, normalizePlatformConfig } from "../lib/plans";
-import { isTrialExpired } from "../lib/trial";
-import type { AcademyMembership, UserProfile } from "../lib/types";
+import type { Academy, AcademyAccess, AcademyMembership, UserProfile } from "../lib/types";
 
 interface AuthContextValue {
   firebaseUser: User | null;
   profile: UserProfile | null;
   membership: AcademyMembership | null;
+  academyAccess: AcademyAccess | null;
   loading: boolean;
   isRoot: boolean;
   isPreviewMode: boolean;
@@ -103,7 +103,27 @@ function isMembershipActive(status: unknown) {
   return normalized === "active" || normalized === "activo";
 }
 
-async function loadActiveMembership(uid: string, email?: string): Promise<AcademyMembership | null> {
+async function buildMembershipResult(
+  academyId: string,
+  academyData: Record<string, unknown>,
+  membership: AcademyMembership,
+  trialDurationDays: number
+) {
+  const academyAccess = resolveAcademyAccess(academyData as Pick<Academy, "status" | "createdAt" | "trial" | "subscription">, trialDurationDays);
+  return {
+    membership: {
+      ...membership,
+      academyId,
+      academyName: String(academyData.name ?? academyId)
+    },
+    academyAccess
+  };
+}
+
+async function loadMembershipAccess(
+  uid: string,
+  email?: string
+): Promise<{ membership: AcademyMembership | null; academyAccess: AcademyAccess | null }> {
   const normalizedEmail = email?.toLowerCase().trim();
   const ownerByUidQuery = query(collection(db, "academies"), where("owner.uid", "==", uid), limit(5));
   const ownerByEmailQuery = normalizedEmail
@@ -121,33 +141,14 @@ async function loadActiveMembership(uid: string, email?: string): Promise<Academ
   const ownerByUidSnap = await safeGetDocs(getDocs(ownerByUidQuery));
   const ownerByEmailSnap = ownerByEmailQuery ? await safeGetDocs(getDocs(ownerByEmailQuery)) : null;
 
-  let ownerAcademyDoc = ownerByUidSnap?.docs.find((docSnap) => docSnap.data().status !== "suspended");
+  let ownerAcademyDoc = ownerByUidSnap?.docs[0];
 
   if (!ownerAcademyDoc && ownerByEmailSnap) {
-    ownerAcademyDoc = ownerByEmailSnap.docs.find((docSnap) => docSnap.data().status !== "suspended");
+    ownerAcademyDoc = ownerByEmailSnap.docs[0];
   }
 
   if (ownerAcademyDoc) {
     const ownerData = ownerAcademyDoc.data() as Record<string, unknown>;
-    const ownerAcademy = ownerData as {
-      createdAt?: unknown;
-      trial?: { active?: boolean; startedAt?: unknown; endsAt?: unknown };
-    };
-    if (
-      String(ownerData.status ?? "").toLowerCase() === "trial" &&
-      isTrialExpired(ownerAcademy, platformConfig.trialDurationDays)
-    ) {
-      await updateDoc(doc(db, "academies", ownerAcademyDoc.id), {
-        status: "suspended",
-        trial: {
-          ...(ownerData.trial as Record<string, unknown> | undefined),
-          active: false
-        },
-        updatedAt: serverTimestamp()
-      });
-      return null;
-    }
-
     void setDoc(
       doc(db, `academies/${ownerAcademyDoc.id}/users/${uid}`),
       {
@@ -161,14 +162,19 @@ async function loadActiveMembership(uid: string, email?: string): Promise<Academ
       { merge: true }
     );
 
-    return {
-      academyId: ownerAcademyDoc.id,
-      academyName: String(ownerData.name ?? ownerAcademyDoc.id),
-      userId: uid,
-      email: normalizedEmail ?? "",
-      role: "owner",
-      status: "active"
-    };
+    return buildMembershipResult(
+      ownerAcademyDoc.id,
+      ownerData,
+      {
+        academyId: ownerAcademyDoc.id,
+        academyName: String(ownerData.name ?? ownerAcademyDoc.id),
+        userId: uid,
+        email: normalizedEmail ?? "",
+        role: "owner",
+        status: "active"
+      },
+      platformConfig.trialDurationDays
+    );
   }
 
   const byUserIdSnap = await safeGetDocs(getDocs(byUserIdQuery));
@@ -184,47 +190,38 @@ async function loadActiveMembership(uid: string, email?: string): Promise<Academ
     membershipDoc = byMailSnap.docs.find((docSnap) => isMembershipActive(docSnap.data().status));
   }
 
-  if (!membershipDoc) return null;
-  const academyRef = membershipDoc.ref.parent.parent;
-  if (!academyRef) return null;
-  const academySnap = await getDoc(academyRef);
-  if (!academySnap.exists()) return null;
-  const academyData = academySnap.data() as Record<string, unknown>;
-  const academyTrialData = academyData as {
-    createdAt?: unknown;
-    trial?: { active?: boolean; startedAt?: unknown; endsAt?: unknown };
-  };
-  if (
-    String(academyData.status ?? "").toLowerCase() === "trial" &&
-    isTrialExpired(academyTrialData, platformConfig.trialDurationDays)
-  ) {
-    await updateDoc(academyRef, {
-      status: "suspended",
-      trial: {
-        ...(academyData.trial as Record<string, unknown> | undefined),
-        active: false
-      },
-      updatedAt: serverTimestamp()
-    });
-    return null;
+  if (!membershipDoc) {
+    return { membership: null, academyAccess: null };
   }
+  const academyRef = membershipDoc.ref.parent.parent;
+  if (!academyRef) {
+    return { membership: null, academyAccess: null };
+  }
+  const academySnap = await getDoc(academyRef);
+  if (!academySnap.exists()) {
+    return { membership: null, academyAccess: null };
+  }
+  const academyData = academySnap.data() as Record<string, unknown>;
 
-  const academyStatus = academyData.status as string | undefined;
-  if (academyStatus === "suspended") return null;
-  const academyName = academySnap.exists() ? (academyData.name as string) : academyRef.id;
-
-  return {
-    academyId: academyRef.id,
-    academyName,
-    ...(membershipDoc.data() as Omit<AcademyMembership, "academyId" | "academyName">),
-    email: String(membershipDoc.data().email ?? membershipDoc.data().mail ?? email ?? "")
-  };
+  return buildMembershipResult(
+    academyRef.id,
+    academyData,
+    {
+      ...(membershipDoc.data() as Omit<AcademyMembership, "academyId" | "academyName" | "email" | "userId">),
+      academyId: academyRef.id,
+      academyName: String(academyData.name ?? academyRef.id),
+      userId: uid,
+      email: String(membershipDoc.data().email ?? membershipDoc.data().mail ?? email ?? "")
+    },
+    platformConfig.trialDurationDays
+  );
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [membership, setMembership] = useState<AcademyMembership | null>(null);
+  const [academyAccess, setAcademyAccess] = useState<AcademyAccess | null>(null);
   const [loading, setLoading] = useState(true);
   const idleTimeoutRef = useRef<number | null>(null);
 
@@ -236,6 +233,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!user) {
         setProfile(null);
         setMembership(null);
+        setAcademyAccess(null);
         setLoading(false);
         return;
       }
@@ -247,12 +245,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (effectiveProfile.platformRole === "root") {
           setMembership(null);
+          setAcademyAccess(null);
         } else {
-          const activeMembership = await loadActiveMembership(user.uid, user.email ?? undefined);
-          setMembership(activeMembership);
+          const resolvedAccess = await loadMembershipAccess(user.uid, user.email ?? undefined);
+          setMembership(resolvedAccess.membership);
+          setAcademyAccess(resolvedAccess.academyAccess);
         }
       } catch {
         setMembership(null);
+        setAcademyAccess(null);
       }
       setLoading(false);
     });
@@ -296,13 +297,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       firebaseUser,
       profile,
       membership,
+      academyAccess,
       loading,
       isRoot: profile?.platformRole === "root",
       isPreviewMode: false,
       canWriteAcademyData: membership?.role === "owner" || membership?.role === "staff",
       logout: () => signOut(auth)
     }),
-    [firebaseUser, profile, membership, loading]
+    [firebaseUser, profile, membership, academyAccess, loading]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

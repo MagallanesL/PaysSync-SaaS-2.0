@@ -1,6 +1,7 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import type { ReactNode } from "react";
+import { SubscriptionGatePage } from "../../pages/SubscriptionGatePage";
 
 function FullScreenLoader() {
   return (
@@ -24,11 +25,12 @@ export function RootOnly({ children }: { children: ReactNode }) {
 }
 
 export function AcademyOnly({ children }: { children: ReactNode }) {
-  const { loading, firebaseUser, isRoot, membership } = useAuth();
+  const { loading, firebaseUser, isRoot, membership, academyAccess } = useAuth();
   if (loading) return <FullScreenLoader />;
   if (!firebaseUser) return <Navigate to="/" replace />;
   if (isRoot) return <Navigate to="/root/dashboard" replace />;
   if (!membership) return <Navigate to="/no-membership" replace />;
+  if (academyAccess && !academyAccess.canAccessApp) return <SubscriptionGatePage />;
   return <>{children}</>;
 }
 

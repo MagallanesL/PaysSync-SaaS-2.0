@@ -53,7 +53,7 @@ function normalizeFee(data: Omit<Fee, "id" | "paidAmount" | "balance" | "status"
 }
 
 export function AcademyDashboardPage() {
-  const { membership, isPreviewMode } = useAuth();
+  const { membership, isPreviewMode, academyAccess } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [fees, setFees] = useState<Fee[]>([]);
   const [academyInfo, setAcademyInfo] = useState<Pick<Academy, "name" | "plan" | "status" | "subscription" | "trial"> | null>(null);
@@ -202,6 +202,14 @@ export function AcademyDashboardPage() {
       };
     }
 
+    if (academyAccess?.state === "grace_period") {
+      return {
+        title: "Estas en periodo de gracia",
+        detail: "La suscripcion vencio pero todavia puedes usar el centro durante 2 dias extra mientras renuevas.",
+        tone: "warning" as const
+      };
+    }
+
     if (academyInfo.subscription?.pendingPlan) {
       return {
         title: "Pago en proceso",
@@ -223,7 +231,7 @@ export function AcademyDashboardPage() {
       detail: "Todavia no vemos una suscripcion mensual activa para este centro.",
       tone: "warning" as const
     };
-  }, [academyInfo]);
+  }, [academyAccess, academyInfo]);
   const collectionRate =
     summary.totalCollected + summary.totalPending > 0
       ? Math.round((summary.totalCollected / (summary.totalCollected + summary.totalPending)) * 100)

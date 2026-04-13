@@ -29,9 +29,10 @@ import {
   normalizePlatformConfig,
   type PlatformConfig
 } from "../../lib/plans";
+import { resolveAcademyAccess } from "../../lib/academyAccess";
 import { addMonths, getCurrentPeriodFromDate, resolveSubscriptionDates } from "../../lib/subscription";
 import { getTrialEndsAtMillis } from "../../lib/trial";
-import type { Academy, AcademyPlan } from "../../lib/types";
+import type { Academy, AcademyAccessState, AcademyPlan } from "../../lib/types";
 
 interface AcademyFormState {
   academyName: string;
@@ -203,12 +204,82 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function resolveAcademyRecurringAmount(academy: Academy, platformConfig: PlatformConfig) {
+  const storedAmount = Number(academy.subscription?.mrr ?? academy.subscription?.amount ?? NaN);
+  if (Number.isFinite(storedAmount) && storedAmount >= 0) {
+    return Math.round(storedAmount);
+  }
+
+  return getPlanPrice(platformConfig, academy.plan);
+}
+
 function getCurrentPeriod() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function resolveBillingStatus(academy: Academy) {
+function getRootAccessBadge(accessState: AcademyAccessState) {
+  switch (accessState) {
+    case "trial_active":
+      return { label: "Trial activo", tone: "warning" as const };
+    case "trial_expired":
+      return { label: "Trial vencido", tone: "danger" as const };
+    case "active":
+      return { label: "Activo", tone: "success" as const };
+    case "grace_period":
+      return { label: "Gracia 2 dias", tone: "warning" as const };
+    case "expired":
+      return { label: "Suscripcion vencida", tone: "danger" as const };
+    case "blocked":
+      return { label: "Bloqueado", tone: "danger" as const };
+    default:
+      return { label: accessState, tone: "neutral" as const };
+  }
+}
+
+function getRootTrialDetail(academy: Academy, trialDurationDays: number) {
+  const access = resolveAcademyAccess(academy, trialDurationDays);
+  if (access.state !== "trial_active" && access.state !== "trial_expired") return null;
+
+  const endsAtLabel = formatDate(access.trialEndsAtMillis);
+  if (access.state === "trial_expired") {
+    return {
+      label: "Trial vencido",
+      detail: endsAtLabel ? `Finalizo el ${endsAtLabel}` : "Finalizo el periodo de prueba",
+      tone: "text-danger"
+    };
+  }
+
+  if (!access.trialEndsAtMillis) {
+    return {
+      label: "Sin fecha valida",
+      detail: "No se pudo calcular el cierre del trial",
+      tone: "text-warning"
+    };
+  }
+
+  const remainingMs = access.trialEndsAtMillis - Date.now();
+  const remainingDays = Math.max(0, Math.ceil(remainingMs / DAY_IN_MS));
+  const label = remainingDays === 1 ? "1 dia restante" : `${remainingDays} dias restantes`;
+
+  return {
+    label,
+    detail: `Hasta el ${endsAtLabel}`,
+    tone: remainingDays <= 3 ? "text-warning" : "text-secondary"
+  };
+}
+
+function resolveBillingStatus(academy: Academy, trialDurationDays: number) {
+  const access = resolveAcademyAccess(academy, trialDurationDays);
+  if (access.state === "trial_expired") {
+    return {
+      status: "trial_expired" as const,
+      label: "Trial vencido",
+      tone: "danger" as const,
+      detail: `Finalizo el ${formatDate(access.trialEndsAtMillis)}`
+    };
+  }
+
   if (academy.status === "trial") {
     return {
       status: "trial" as const,
@@ -237,6 +308,14 @@ function resolveBillingStatus(academy: Academy) {
     explicitStatus ?? (dueDate && Date.now() > dueDate.getTime() ? ("overdue" as const) : ("pending" as const));
 
   if (effectiveStatus === "paid") {
+    if (access.state === "grace_period") {
+      return {
+        status: "grace_period" as const,
+        label: "En gracia",
+        tone: "warning" as const,
+        detail: `Renueva antes del ${formatDate(access.graceEndsAtMillis)}`
+      };
+    }
     return {
       status: "paid" as const,
       label: "Pagado",
@@ -246,6 +325,14 @@ function resolveBillingStatus(academy: Academy) {
   }
 
   if (effectiveStatus === "overdue") {
+    if (access.state === "expired" || access.state === "blocked") {
+      return {
+        status: "expired" as const,
+        label: "Vencido y bloqueado",
+        tone: "danger" as const,
+        detail: `Vencio el ${formatDate(dueDate)}`
+      };
+    }
     return {
       status: "overdue" as const,
       label: "Vencido",
@@ -262,10 +349,10 @@ function resolveBillingStatus(academy: Academy) {
   };
 }
 
-function buildOwnerWhatsAppLink(academy: Academy, amount: number) {
+function buildOwnerWhatsAppLink(academy: Academy, amount: number, trialDurationDays: number) {
   const rawPhone = academy.owner?.phone?.replace(/\D/g, "") ?? "";
   if (!rawPhone) return null;
-  const status = resolveBillingStatus(academy);
+  const status = resolveBillingStatus(academy, trialDurationDays);
   const text = encodeURIComponent(
     `Hola ${academy.owner?.name || ""}, te escribimos por el abono de ${academy.name}. Estado actual: ${status.label}. Importe de referencia: $${amount}.`
   );
@@ -305,34 +392,7 @@ function buildActiveSubscriptionPayload(academy: Academy | null | undefined, amo
 }
 
 function getTrialSummary(academy: Academy, trialDurationDays: number) {
-  if (academy.status !== "trial") return null;
-
-  const endsAtMillis = getTrialEndsAtMillis(academy, trialDurationDays);
-  if (!endsAtMillis) {
-    return {
-      label: "Sin fecha valida",
-      detail: "No se pudo calcular el cierre del trial",
-      tone: "text-warning"
-    };
-  }
-
-  const remainingMs = endsAtMillis - Date.now();
-  if (remainingMs <= 0) {
-    return {
-      label: "Trial vencido",
-      detail: `Finalizo el ${formatDate(academy.trial?.endsAt)}`,
-      tone: "text-danger"
-    };
-  }
-
-  const remainingDays = Math.ceil(remainingMs / DAY_IN_MS);
-  const label = remainingDays === 1 ? "1 dia restante" : `${remainingDays} dias restantes`;
-
-  return {
-    label,
-    detail: `Hasta el ${formatDate(academy.trial?.endsAt)}`,
-    tone: remainingDays <= 3 ? "text-warning" : "text-secondary"
-  };
+  return getRootTrialDetail(academy, trialDurationDays);
 }
 
 export function RootDashboardPage() {
@@ -363,21 +423,8 @@ export function RootDashboardPage() {
 
   async function loadAcademies() {
     const academySnap = await getDocs(collection(db, "academies"));
-    const loadedAcademies = await Promise.all(
-      academySnap.docs.map(async (docSnap) => {
+    const loadedAcademies = academySnap.docs.map((docSnap) => {
         const data = docSnap.data() as Omit<Academy, "id"> & { plan?: string };
-        const trialEndsAtMillis = getTrialEndsAtMillis(data, platformConfig.trialDurationDays);
-        if (data.status === "trial" && trialEndsAtMillis !== null && trialEndsAtMillis <= Date.now()) {
-          await updateDoc(doc(db, "academies", docSnap.id), {
-            status: "suspended",
-            trial: {
-              ...(data.trial ?? {}),
-              active: false
-            },
-            updatedAt: serverTimestamp()
-          });
-          data.status = "suspended";
-        }
         const normalizedPlan = data.plan as AcademyPlan;
         return {
           id: docSnap.id,
@@ -387,8 +434,7 @@ export function RootDashboardPage() {
             maxStudents: data.planLimits?.maxStudents ?? getPlanLimit(platformConfig, normalizedPlan)
           }
         };
-      })
-    );
+      });
     setAcademies(loadedAcademies);
   }
 
@@ -420,20 +466,25 @@ export function RootDashboardPage() {
   }, [isCreateModalOpen]);
 
   const kpis = useMemo(() => {
+    const accessStates = academies.map((academy) => resolveAcademyAccess(academy, platformConfig.trialDurationDays).state);
     const total = academies.length;
-    const trials = academies.filter((academy) => academy.status === "trial").length;
-    const active = academies.filter((academy) => academy.status === "active").length;
-    const suspended = academies.filter((academy) => academy.status === "suspended").length;
+    const trials = accessStates.filter((state) => state === "trial_active").length;
+    const active = accessStates.filter((state) => state === "active" || state === "grace_period").length;
+    const suspended = accessStates.filter((state) => state === "trial_expired" || state === "expired" || state === "blocked").length;
     const mrr = academies
-      .filter((academy) => academy.status === "active")
-      .reduce((sum, academy) => sum + getPlanPrice(platformConfig, academy.plan), 0);
+      .filter((academy) => {
+        const accessState = resolveAcademyAccess(academy, platformConfig.trialDurationDays).state;
+        return accessState === "active" || accessState === "grace_period";
+      })
+      .reduce((sum, academy) => sum + resolveAcademyRecurringAmount(academy, platformConfig), 0);
     return { total, trials, active, suspended, mrr };
   }, [academies, platformConfig]);
 
   const billingSnapshot = useMemo(() => {
     const rows = academies.map((academy) => {
-      const billing = resolveBillingStatus(academy);
-      const amount = getPlanPrice(platformConfig, academy.plan);
+      const access = resolveAcademyAccess(academy, platformConfig.trialDurationDays);
+      const billing = resolveBillingStatus(academy, platformConfig.trialDurationDays);
+      const amount = resolveAcademyRecurringAmount(academy, platformConfig);
       const subscriptionDates = resolveSubscriptionDates(academy);
       const dueMillis = subscriptionDates.renewsAt?.getTime() ?? null;
       const daysUntilDue =
@@ -441,6 +492,7 @@ export function RootDashboardPage() {
 
       return {
         academy,
+        access,
         billing,
         amount,
         subscriptionDates,
@@ -449,19 +501,30 @@ export function RootDashboardPage() {
       };
     });
 
-    const overdue = rows.filter((row) => row.billing.status === "overdue");
-    const pending = rows.filter((row) => row.billing.status === "pending");
-    const paid = rows.filter((row) => row.billing.status === "paid");
+    const overdue = rows.filter((row) => row.access.state === "expired");
+    const pending = rows.filter((row) => row.billing.status === "pending" || row.access.state === "trial_active");
+    const paid = rows.filter((row) => row.access.state === "active" || row.access.state === "grace_period");
     const dueSoon = rows.filter(
-      (row) => row.billing.status === "pending" && row.daysUntilDue !== null && row.daysUntilDue >= 0 && row.daysUntilDue <= 7
+      (row) =>
+        (row.access.state === "active" || row.access.state === "grace_period") &&
+        row.daysUntilDue !== null &&
+        row.daysUntilDue >= 0 &&
+        row.daysUntilDue <= 7
     );
     const riskAmount = rows
-      .filter((row) => row.billing.status === "overdue" || row.billing.status === "pending")
+      .filter((row) => row.access.state === "expired" || row.access.state === "trial_expired" || row.billing.status === "pending")
       .reduce((sum, row) => sum + row.amount, 0);
 
     const sortedRows = [...rows].sort((left, right) => {
-      const priority = { overdue: 0, pending: 1, paid: 2, trial: 3, suspended: 4 } as const;
-      const byStatus = priority[left.billing.status] - priority[right.billing.status];
+      const priority = {
+        expired: 0,
+        trial_expired: 1,
+        grace_period: 2,
+        active: 3,
+        trial_active: 4,
+        blocked: 5
+      } as const;
+      const byStatus = priority[left.access.state] - priority[right.access.state];
       if (byStatus !== 0) return byStatus;
       return (left.dueMillis ?? Number.MAX_SAFE_INTEGER) - (right.dueMillis ?? Number.MAX_SAFE_INTEGER);
     });
@@ -478,11 +541,14 @@ export function RootDashboardPage() {
 
   const planBreakdown = useMemo(() => {
     return (["basic", "pro", "premium"] as AcademyPlan[]).map((plan) => {
-      const count = academies.filter((academy) => academy.plan === plan && academy.status === "active").length;
+      const academiesInPlan = academies.filter((academy) => {
+        const accessState = resolveAcademyAccess(academy, platformConfig.trialDurationDays).state;
+        return academy.plan === plan && (accessState === "active" || accessState === "grace_period");
+      });
       return {
         plan,
-        count,
-        revenue: count * getPlanPrice(platformConfig, plan)
+        count: academiesInPlan.length,
+        revenue: academiesInPlan.reduce((sum, academy) => sum + resolveAcademyRecurringAmount(academy, platformConfig), 0)
       };
     });
   }, [academies, platformConfig]);
@@ -610,11 +676,21 @@ export function RootDashboardPage() {
 
   async function handleToggleAcademyStatus(academy: Academy) {
     const trialEndsAtMillis = getTrialEndsAtMillis(academy, platformConfig.trialDurationDays);
+    const hasStoredSubscription = Boolean(
+      academy.subscription?.startedAt ||
+        academy.subscription?.lastPaidAt ||
+        academy.subscription?.renewsAt ||
+        academy.subscription?.billingStatus === "paid" ||
+        academy.subscription?.billingStatus === "overdue"
+    );
     const canResumeTrial =
-      Boolean(academy.trial?.active) && trialEndsAtMillis !== null && trialEndsAtMillis > Date.now();
+      !hasStoredSubscription &&
+      Boolean(academy.trial?.active) &&
+      trialEndsAtMillis !== null &&
+      trialEndsAtMillis > Date.now();
     const nextStatus: Academy["status"] =
       academy.status === "suspended" ? (canResumeTrial ? "trial" : "active") : "suspended";
-    const planAmount = getPlanPrice(platformConfig, academy.plan);
+    const recurringAmount = resolveAcademyRecurringAmount(academy, platformConfig);
     await updateDoc(doc(db, "academies", academy.id), {
       status: nextStatus,
       ...(academy.status === "suspended" && canResumeTrial
@@ -627,7 +703,7 @@ export function RootDashboardPage() {
         : {}),
       ...(academy.status === "suspended" && !canResumeTrial
         ? {
-            subscription: buildActiveSubscriptionPayload(academy, planAmount)
+            subscription: buildActiveSubscriptionPayload(academy, recurringAmount)
           }
         : {}),
       updatedAt: serverTimestamp()
@@ -670,7 +746,9 @@ export function RootDashboardPage() {
 
     const currentAcademy = academies.find((academy) => academy.id === editState.id);
     const trialEndsAt = Timestamp.fromMillis(Date.now() + platformConfig.trialDurationDays * DAY_IN_MS);
-    const planAmount = getPlanPrice(platformConfig, editState.plan);
+    const planAmount = currentAcademy && currentAcademy.plan === editState.plan
+      ? resolveAcademyRecurringAmount(currentAcademy, platformConfig)
+      : getPlanPrice(platformConfig, editState.plan);
     const trialPayload =
       editState.status === "trial"
         ? {
@@ -769,7 +847,7 @@ export function RootDashboardPage() {
     academy: Academy,
     status: "paid" | "pending" | "overdue"
   ) {
-    const amount = getPlanPrice(platformConfig, academy.plan);
+    const amount = resolveAcademyRecurringAmount(academy, platformConfig);
     const now = new Date();
     const dates = resolveSubscriptionDates(academy);
     const baseDate =
@@ -973,7 +1051,7 @@ export function RootDashboardPage() {
                       ) : (
                         billingSnapshot.rows.map(({ academy, billing, amount, subscriptionDates, daysUntilDue }) => {
                           const planLabel = getPlanLabel(platformConfig, academy.plan);
-                          const whatsappUrl = buildOwnerWhatsAppLink(academy, amount);
+                          const whatsappUrl = buildOwnerWhatsAppLink(academy, amount, platformConfig.trialDurationDays);
                           const mailUrl = buildOwnerMailLink(academy, amount, planLabel);
                           const dueTone =
                             billing.status === "overdue"
@@ -1093,7 +1171,7 @@ export function RootDashboardPage() {
                       <div>
                         <p className="text-sm font-semibold text-text">{getPlanLabel(platformConfig, item.plan)}</p>
                         <p className="mt-1 text-xs text-muted">
-                          {item.count} academias activas | ${getPlanPrice(platformConfig, item.plan)}/mes
+                          {item.count} academias activas | {formatCurrency(item.revenue)}
                         </p>
                       </div>
                       <p className="text-lg font-semibold text-secondary">${item.revenue}</p>
@@ -1286,13 +1364,18 @@ export function RootDashboardPage() {
               <MetricInline label="Total" value={academies.length} tone="success" helper="Base total de centros" />
               <MetricInline
                 label="En prueba"
-                value={academies.filter((academy) => academy.status === "trial").length}
+                value={academies.filter((academy) => resolveAcademyAccess(academy, platformConfig.trialDurationDays).state === "trial_active").length}
                 tone="warning"
                 helper="Todavia no facturan"
               />
               <MetricInline
-                label="Suspendidos"
-                value={academies.filter((academy) => academy.status === "suspended").length}
+                label="Bloqueados"
+                value={
+                  academies.filter((academy) => {
+                    const accessState = resolveAcademyAccess(academy, platformConfig.trialDurationDays).state;
+                    return accessState === "trial_expired" || accessState === "expired" || accessState === "blocked";
+                  }).length
+                }
                 tone="danger"
                 helper="Sin acceso habilitado"
               />
@@ -1327,6 +1410,8 @@ export function RootDashboardPage() {
                     </tr>
                   ) : (
                     academies.map((academy) => {
+                      const access = resolveAcademyAccess(academy, platformConfig.trialDurationDays);
+                      const accessBadge = getRootAccessBadge(access.state);
                       const trialSummary = getTrialSummary(academy, platformConfig.trialDurationDays);
 
                       return (
@@ -1342,7 +1427,9 @@ export function RootDashboardPage() {
                           </td>
                           <td className="px-4 py-4">
                             <div className="grid gap-1">
-                              <p className="text-base font-semibold text-secondary">${getPlanPrice(platformConfig, academy.plan)}</p>
+                              <p className="text-base font-semibold text-secondary">
+                                {formatCurrency(resolveAcademyRecurringAmount(academy, platformConfig))}
+                              </p>
                               <p className="text-xs text-muted">por mes</p>
                             </div>
                           </td>
@@ -1350,8 +1437,8 @@ export function RootDashboardPage() {
                             <Badge tone="neutral">{formatPlanLimitValue(getPlanLimit(platformConfig, academy.plan))}</Badge>
                           </td>
                           <td className="px-4 py-4">
-                            <Badge tone={academy.status === "active" ? "success" : academy.status === "suspended" ? "danger" : "warning"}>
-                              {formatMembershipStatus(academy.status)}
+                            <Badge tone={accessBadge.tone}>
+                              {accessBadge.label}
                             </Badge>
                           </td>
                           <td className="px-4 py-4">
