@@ -269,9 +269,7 @@ export function AuthEntryPanel({
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="font-display text-2xl text-primary">PaySync</p>
-              <p className="mt-2 max-w-sm text-sm leading-6 text-[#B3B3B3]">
-                Cobros claros para academias.
-              </p>
+              {/* <p className="mt-2 max-w-sm text-sm leading-6 text-[#B3B3B3]">Ingresa a tu cuenta.</p> */}
             </div>
             {embedded && onRequestClose && (
               <button
@@ -287,17 +285,6 @@ export function AuthEntryPanel({
             )}
           </div>
 
-          <div className="mt-6 grid gap-3">
-            <div className="rounded-[18px] border border-white/10 bg-[#1A1A1A] p-3.5">
-              <p className="text-xs uppercase tracking-[0.22em] text-primary">Ideal para</p>
-              <p className="mt-2 text-sm leading-6 text-slate-200">Academias y centros deportivos.</p>
-            </div>
-            <div className="rounded-[18px] border border-white/10 bg-[#1A1A1A] p-3.5">
-              <p className="text-xs uppercase tracking-[0.22em] text-secondary">Incluye</p>
-              <p className="mt-2 text-sm leading-6 text-slate-200">Prueba gratis y control de cuotas.</p>
-            </div>
-          </div>
-
           {!embedded && (
             <div className="mt-6 rounded-[18px] border border-white/10 bg-[#1A1A1A] p-3.5 text-sm text-[#B3B3B3]">
               <p>Si ya tienes cuenta, entra y sigue donde lo dejaste.</p>
@@ -311,9 +298,9 @@ export function AuthEntryPanel({
         <section className={`bg-[#161616] p-5 sm:p-6 lg:p-8 ${embedded ? "overflow-y-auto" : ""}`}>
           <div className={`mx-auto flex w-full flex-col gap-4 sm:flex-row sm:items-center sm:justify-between ${embedded ? "" : contentWidthClass}`}>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#B3B3B3]">Acceso</p>
+              {/* <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#B3B3B3]">Acceo</p> */}
               <h1 className={`mt-2 font-display leading-tight text-white ${compactEmbeddedRegister ? "text-[1.55rem] sm:text-[1.75rem]" : "text-[1.9rem]"}`}>
-                {mode === "register" ? "Crea tu academia y empeza a cobrar mejor hoy" : "Entra y mira quien te debe hoy"}
+                {mode === "register" ? "Crea tu academia y empeza a usar PaySync" : "Inicia sesion"}
               </h1>
             </div>
             <div className="grid grid-cols-2 gap-2 rounded-[16px] border border-white/10 bg-[#0B0B0B] p-1 sm:min-w-[220px]">
@@ -342,9 +329,6 @@ export function AuthEntryPanel({
                   placeholder="••••••••"
                 />
               </div>
-
-              <p className="text-sm text-[#B3B3B3]">Accede a tu resumen de cobros en segundos</p>
-
               {loginError && (
                 <p className="rounded-[16px] border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{loginError}</p>
               )}
@@ -357,7 +341,6 @@ export function AuthEntryPanel({
                 >
                   {loginSubmitting ? "Ingresando..." : "Ingresar"}
                 </button>
-                <p className="text-center text-xs text-[#B3B3B3]">Acceso seguro. Sin configuraciones complicadas.</p>
                 {embedded ? (
                   <button
                     type="button"
