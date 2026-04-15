@@ -1,32 +1,32 @@
 const solutions = [
   {
-    title: "Control total",
-    text: "Sabe en segundos quien pago y quien debe"
+    title: "Cobros claros",
+    text: "Visualiza en segundos quien esta al dia y quien debe."
   },
   {
-    title: "Registro simple",
-    text: "Carga pagos en menos de 10 segundos"
+    title: "Menos seguimiento",
+    text: "Reduce atrasos en los pagos sin perseguir a nadie."
   },
   {
-    title: "Resumen mensual",
-    text: "Visualiza ingresos y deudas sin esfuerzo"
+    title: "Todo centralizado",
+    text: "Centraliza alumnos, cuotas y pagos en un solo lugar."
   },
   {
-    title: "Menos tiempo perdido",
-    text: "Deja de perseguir pagos manualmente"
+    title: "Control diario",
+    text: "Consulta el estado de tu academia en segundos cada vez que lo necesites."
   }
 ];
 
-export function SolutionSection() {
+export function SolutionSection({ onPrimaryClick }: { onPrimaryClick: () => void }) {
   return (
     <section className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(26,26,26,0.96),rgba(15,15,15,0.98))] px-5 py-8 sm:px-7 sm:py-10">
       <div className="max-w-3xl">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#00C896]">La propuesta</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#00C896]">Lo que ganas con PaySync</p>
         <h2 className="mt-3 text-[1.9rem] font-semibold leading-tight text-white sm:text-[2.6rem]">
-          Todo eso se termina con PaySync
+          Menos seguimiento manual. Mas control real de tus cobros.
         </h2>
         <p className="mt-4 text-base leading-7 text-[#B3B3B3]">
-          PaySync te muestra lo importante en el momento correcto para que cobres con orden y sin perseguir alumnos manualmente.
+          PaySync te muestra lo importante rapido, para que cobres con orden y tomes decisiones sin depender de planillas ni mensajes sueltos.
         </p>
       </div>
 
@@ -42,6 +42,16 @@ export function SolutionSection() {
             <p className="mt-4 text-sm leading-7 text-[#B3B3B3]">{solution.text}</p>
           </article>
         ))}
+      </div>
+
+      <div className="mt-8">
+        <button
+          type="button"
+          onClick={onPrimaryClick}
+          className="inline-flex min-h-12 items-center justify-center rounded-[16px] bg-[#00C896] px-6 py-3 text-sm font-semibold text-[#0B0B0B] transition hover:brightness-110"
+        >
+          Empezar ahora
+        </button>
       </div>
     </section>
   );

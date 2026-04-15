@@ -228,7 +228,7 @@ export function AuthEntryPanel({
     }
   }
 
-  const registerRouteCta = "Todavia no usas PaySync? Probalo gratis";
+  const registerRouteCta = "Todavia no usas PaySync? Crea tu cuenta";
   const compactEmbeddedRegister = embedded && mode === "register";
   const contentWidthClass = mode === "register" ? "max-w-2xl" : "max-w-md";
   const selectedPlanLimit = getPlanLimit(platformConfig, registerForm.plan);
@@ -300,7 +300,7 @@ export function AuthEntryPanel({
             <div>
               {/* <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#B3B3B3]">Acceo</p> */}
               <h1 className={`mt-2 font-display leading-tight text-white ${compactEmbeddedRegister ? "text-[1.55rem] sm:text-[1.75rem]" : "text-[1.9rem]"}`}>
-                {mode === "register" ? "Crea tu academia y empeza a usar PaySync" : "Inicia sesion"}
+                {mode === "register" ? "Crea tu cuenta y empieza a usar PaySync" : "Inicia sesion"}
               </h1>
             </div>
             <div className="grid grid-cols-2 gap-2 rounded-[16px] border border-white/10 bg-[#0B0B0B] p-1 sm:min-w-[220px]">
@@ -347,7 +347,7 @@ export function AuthEntryPanel({
                     onClick={() => setMode("register")}
                     className="text-center text-sm font-medium text-primary transition hover:brightness-110"
                   >
-                    Todavia no usas PaySync? Probalo gratis
+                    Todavia no usas PaySync? Crea tu cuenta
                   </button>
                 ) : (
                   <Link to="/register" className="text-center text-sm font-medium text-primary transition hover:brightness-110">
@@ -361,9 +361,9 @@ export function AuthEntryPanel({
               <div className={`rounded-[20px] border border-primary/30 bg-gradient-to-br from-primary/12 via-primary/5 to-[#0B0B0B] text-sm text-[#B3B3B3] shadow-soft ${compactEmbeddedRegister ? "p-3.5" : "p-4"}`}>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Prueba gratis</p>
                 <p className={`mt-2 font-semibold text-white ${compactEmbeddedRegister ? "text-[0.98rem] leading-6 sm:text-base" : "text-base leading-7 sm:text-lg"}`}>
-                  Proba PaySync gratis por {platformConfig.trialDurationDays} dias
+                  Prueba PaySync gratis por {platformConfig.trialDurationDays} dias
                 </p>
-                <p className={`mt-2 ${compactEmbeddedRegister ? "leading-5" : "leading-6"}`}>Sin compromiso. Empeza a usarlo hoy.</p>
+                <p className={`mt-2 ${compactEmbeddedRegister ? "leading-5" : "leading-6"}`}>Sin compromiso. Crea tu cuenta y empieza hoy.</p>
               </div>
 
               <div className={`grid ${compactEmbeddedRegister ? "gap-4" : "gap-5"}`}>
@@ -481,7 +481,7 @@ export function AuthEntryPanel({
                   disabled={registerSubmitting}
                   className="w-full rounded-[16px] bg-primary px-4 py-3 text-sm font-semibold text-[#0B0B0B] transition hover:brightness-110 disabled:opacity-70"
                 >
-                  {registerSubmitting ? "Creando academia..." : "Crear mi academia gratis"}
+                  {registerSubmitting ? "Creando cuenta..." : "Crear cuenta"}
                 </button>
                 <p className="text-center text-xs text-[#B3B3B3]">
                   Luego continua en ${getPlanPrice(platformConfig, registerForm.plan)}/mes. Cancelas cuando quieras.

@@ -76,7 +76,7 @@ export function MarketingLandingPage() {
                 onClick={() => setAuthModalMode("register")}
                 className="inline-flex min-h-11 items-center justify-center rounded-[14px] bg-[#00C896] px-4 py-2 text-sm font-semibold text-[#0B0B0B] transition hover:brightness-110"
               >
-                Probar gratis
+                Crear cuenta
               </button>
             </div>
           </div>
@@ -89,17 +89,17 @@ export function MarketingLandingPage() {
             onSecondaryClick={() => document.getElementById("como-funciona")?.scrollIntoView({ behavior: "smooth" })}
           />
           <ProblemSection />
-          <SolutionSection />
-          <HowItWorks />
+          <SolutionSection onPrimaryClick={() => setAuthModalMode("register")} />
+          <HowItWorks onPrimaryClick={() => setAuthModalMode("register")} />
 
           <section className="rounded-[30px] border border-white/10 bg-[#121212] px-5 py-8 text-center sm:px-7 sm:py-10">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#00C896]">Beneficio clave</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#00C896]">Impacto inmediato</p>
             <h2 className="mx-auto mt-3 max-w-4xl text-[2rem] font-semibold leading-tight text-white sm:text-[2.8rem]">
-              Menos tiempo persiguiendo pagos. Mas tiempo enseñando.
+              Menos tiempo persiguiendo pagos. Mas tiempo ensenando y haciendo crecer tu academia.
             </h2>
           </section>
 
-          <Testimonials />
+          <Testimonials onPrimaryClick={() => setAuthModalMode("register")} />
           <Pricing
             trialDays={config.trialDurationDays}
             monthlyPrice={startingMonthlyPrice}
@@ -109,10 +109,10 @@ export function MarketingLandingPage() {
         </main>
 
         <footer className="mt-10 border-t border-white/10 pt-6 text-center text-sm text-[#B3B3B3]">
-          <p>PaySync para academias, danza, deportes y coaches que quieren cobrar con orden.</p>
+          <p>PaySync para academias, entrenadores, clubes y centros que quieren cobrar con orden.</p>
           <div className="mt-3">
             <Link to="/login" className="transition hover:text-white">
-              Tambien puedes entrar desde la pagina de acceso
+              Si ya tienes cuenta, entra desde la pagina de acceso
             </Link>
           </div>
         </footer>
@@ -124,7 +124,7 @@ export function MarketingLandingPage() {
           onClick={() => setAuthModalMode("register")}
           className="inline-flex min-h-12 w-full items-center justify-center rounded-[16px] bg-[#00C896] px-5 py-3 text-sm font-semibold text-[#0B0B0B]"
         >
-          Probar gratis {config.trialDurationDays} dias
+          Empezar gratis
         </button>
       </div>
     </div>

@@ -1,8 +1,7 @@
 const problems = [
-  "Anotas pagos en Excel o cuadernos",
-  "Te mandan comprobantes por WhatsApp",
-  "No sabes quien te debe",
-  "Tienes que recordar a quien cobrarle"
+  "No sabes quien pago y quien no",
+  "Pierdes tiempo persiguiendo pagos",
+  "Todo depende de tu memoria"
 ];
 
 export function ProblemSection() {
@@ -10,15 +9,15 @@ export function ProblemSection() {
     <section className="rounded-[30px] border border-white/10 bg-[#121212] px-5 py-8 sm:px-7 sm:py-10">
       <SectionIntro
         eyebrow="Lo que pasa hoy"
-        title="Si manejas tu academia asi, estas perdiendo plata"
-        description="Cuando los cobros viven repartidos entre chats, planillas y memoria, lo normal es cobrar tarde, olvidarte de alguien o perder tiempo todos los meses."
+        title="El problema no es cobrar. El problema es cobrar asi."
+        description="Si hoy gestionas tus cobros con Excel, WhatsApp y recordatorios manuales, ya sabes lo dificil que es mantener todo al dia."
       />
 
-      <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {problems.map((problem) => (
+      <div className="mt-8 grid gap-4 md:grid-cols-3">
+        {problems.map((problem, index) => (
           <div key={problem} className="rounded-[22px] border border-white/10 bg-[#0F0F0F] p-5">
             <div className="flex h-11 w-11 items-center justify-center rounded-[16px] bg-[#00C896]/10 text-lg font-semibold text-[#00C896]">
-              !
+              0{index + 1}
             </div>
             <p className="mt-4 text-sm leading-7 text-white">{problem}</p>
           </div>

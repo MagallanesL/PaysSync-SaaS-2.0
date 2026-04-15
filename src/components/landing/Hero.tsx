@@ -15,13 +15,13 @@ export function Hero({
       <div className="relative grid gap-10 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
         <div>
           <div className="inline-flex rounded-full border border-[#00C896]/20 bg-[#00C896]/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-[#00C896]">
-            Cobros claros para academias
+            Cobros ordenados para academias
           </div>
           <h1 className="mt-5 max-w-3xl text-[2.35rem] font-semibold leading-[1.02] text-white sm:text-5xl lg:text-[4.2rem]">
-            Deja de perder dinero por no saber quien te pago
+            Deja de perseguir alumnos para cobrar. Automatiza tus cuotas con PaySync.
           </h1>
           <p className="mt-5 max-w-2xl text-base leading-7 text-[#B3B3B3] sm:text-lg sm:leading-8">
-            PaySync te permite controlar pagos, deudas y alumnos en segundos, sin Excel ni WhatsApp.
+            Organiza pagos, reduce morosidad y controla tu academia desde un solo lugar.
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -30,21 +30,31 @@ export function Hero({
               onClick={onPrimaryClick}
               className="inline-flex min-h-12 items-center justify-center rounded-[16px] bg-[#00C896] px-6 py-3 text-sm font-semibold text-[#0B0B0B] transition hover:brightness-110"
             >
-              Probar gratis {trialDays} dias
+              Probar gratis
             </button>
             <button
               type="button"
-              onClick={onSecondaryClick}
+              onClick={onPrimaryClick}
               className="inline-flex min-h-12 items-center justify-center rounded-[16px] border border-white/10 bg-white/[0.03] px-6 py-3 text-sm font-semibold text-white transition hover:border-[#00C896] hover:text-[#00C896]"
             >
-              Ver como funciona
+              Crear cuenta en 1 minuto
             </button>
           </div>
 
+          <button
+            type="button"
+            onClick={onSecondaryClick}
+            className="mt-3 inline-flex text-sm font-medium text-[#B3B3B3] transition hover:text-white"
+          >
+            Ver como funciona
+          </button>
+
+          <p className="mt-3 text-sm text-[#B3B3B3]">Prueba gratis por {trialDays} dias. Crea tu cuenta en menos de 1 minuto.</p>
+
           <div className="mt-8 grid gap-3 sm:grid-cols-3">
-            <Metric label="Cobros ordenados" value="Todo en un panel" />
-            <Metric label="Menos seguimiento manual" value="Menos WhatsApp" />
-            <Metric label="Decision mas rapida" value="Quien debe hoy" />
+            <Metric label="Cobros claros" value="Quien pago y quien no" />
+            <Metric label="Menos demora" value="Menos mora, mas orden" />
+            <Metric label="Gestion simple" value="Tu academia en un panel" />
           </div>
         </div>
 
@@ -55,7 +65,7 @@ export function Hero({
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="text-xs uppercase tracking-[0.2em] text-[#00C896]">Dashboard</p>
-                  <p className="mt-1 text-sm text-[#B3B3B3]">Pagos, deudas y alumnos en un solo lugar</p>
+                  <p className="mt-1 text-sm text-[#B3B3B3]">Pagos, cuotas y alumnos en un solo lugar</p>
                 </div>
                 <span className="rounded-full bg-[#00C896]/12 px-3 py-1 text-xs font-semibold text-[#00C896]">Al dia</span>
               </div>

@@ -16,14 +16,35 @@ const testimonials = [
   }
 ];
 
-export function Testimonials() {
+export function Testimonials({ onPrimaryClick }: { onPrimaryClick: () => void }) {
   return (
     <section className="rounded-[30px] border border-white/10 bg-[#121212] px-5 py-8 sm:px-7 sm:py-10">
       <div className="max-w-3xl">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#00C896]">Experiencias reales</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#00C896]">Confianza</p>
         <h2 className="mt-3 text-[1.9rem] font-semibold leading-tight text-white sm:text-[2.6rem]">
-          Academias como la tuya ya lo usan
+          Pensado para academias, entrenadores y clubes que necesitan ordenar sus cobros sin complicarse.
         </h2>
+        <p className="mt-4 text-base leading-7 text-[#B3B3B3]">
+          Esta seccion ya queda lista para seguir sumando testimonios y prueba social a medida que avances.
+        </p>
+      </div>
+
+      <div className="mt-8 rounded-[24px] border border-[#00C896]/20 bg-[#101010] p-5 sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="max-w-2xl">
+            <p className="text-sm font-semibold text-white">Preparado para generar confianza desde el primer vistazo</p>
+            <p className="mt-2 text-sm leading-7 text-[#B3B3B3]">
+              Puedes seguir alimentando este bloque con casos reales, resultados y testimonios sin tocar la estructura visual actual.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onPrimaryClick}
+            className="inline-flex min-h-12 items-center justify-center rounded-[16px] bg-[#00C896] px-6 py-3 text-sm font-semibold text-[#0B0B0B] transition hover:brightness-110"
+          >
+            Crear cuenta
+          </button>
+        </div>
       </div>
 
       <div className="mt-8 grid gap-4 lg:grid-cols-3">
