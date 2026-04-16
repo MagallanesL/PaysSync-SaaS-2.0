@@ -21,7 +21,8 @@ import type { AcademyPlan } from "../../lib/types";
 interface Student {
   id: string;
   fullName: string;
-  email: string;
+  dni: string;
+  birthDate: string;
   phone: string;
   emergencyContactName: string;
   contactPhone: string;
@@ -46,7 +47,8 @@ interface DisciplineOption extends AssignedDiscipline {
 
 interface StudentFormState {
   fullName: string;
-  email: string;
+  dni: string;
+  birthDate: string;
   phone: string;
   emergencyContactName: string;
   contactPhone: string;
@@ -56,7 +58,8 @@ interface StudentFormState {
 
 const emptyForm: StudentFormState = {
   fullName: "",
-  email: "",
+  dni: "",
+  birthDate: "",
   phone: "",
   emergencyContactName: "",
   contactPhone: "",
@@ -79,6 +82,88 @@ function buildWhatsAppLink(phone: string) {
   return `https://wa.me/${normalizedPhone}`;
 }
 
+function calculateAge(birthDate: string) {
+  if (!birthDate) return null;
+
+  const parsedDate = new Date(`${birthDate}T00:00:00`);
+  if (Number.isNaN(parsedDate.getTime())) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - parsedDate.getFullYear();
+  const monthDiff = today.getMonth() - parsedDate.getMonth();
+  const hasNotHadBirthdayYet = monthDiff < 0 || (monthDiff === 0 && today.getDate() < parsedDate.getDate());
+
+  if (hasNotHadBirthdayYet) age -= 1;
+  return age >= 0 ? age : null;
+}
+
+function formatAgeLabel(birthDate: string) {
+  const age = calculateAge(birthDate);
+  return age === null ? "-" : `${age} años`;
+}
+
+function splitStudentName(fullName: string) {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { firstName: "", lastName: "" };
+  if (parts.length === 1) return { firstName: parts[0], lastName: "" };
+
+  return {
+    firstName: parts.slice(0, -1).join(" "),
+    lastName: parts[parts.length - 1] ?? ""
+  };
+}
+
+function getStudentExportRows(students: Student[]) {
+  return students.map((student) => {
+    const { firstName, lastName } = splitStudentName(student.fullName);
+    return {
+      lastName,
+      firstName,
+      dni: student.dni,
+      birthDate: student.birthDate,
+      discipline: student.disciplines?.map((discipline) => discipline.name).join(", ") ?? ""
+    };
+  });
+}
+
+function escapeCsvCell(value: string) {
+  const normalized = value.replace(/"/g, "\"\"");
+  return /[;"\n\r]/.test(normalized) ? `"${normalized}"` : normalized;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function downloadBlob(filename: string, content: Blob) {
+  const url = URL.createObjectURL(content);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function buildExportFilename(prefix: string) {
+  const date = new Date().toISOString().slice(0, 10);
+  return `${prefix}-${date}`;
+}
+
+function normalizeSearchValue(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 export function StudentsPage() {
   const { membership, canWriteAcademyData, isPreviewMode } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
@@ -89,6 +174,7 @@ export function StudentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [disciplines, setDisciplines] = useState<DisciplineOption[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
 
   const academyPath = membership ? `academies/${membership.academyId}` : null;
 
@@ -99,7 +185,8 @@ export function StudentsPage() {
           {
             id: "student-1",
             fullName: "Ana Perez",
-            email: "ana@demo.com",
+            dni: "45111222",
+            birthDate: "2012-04-03",
             phone: "11-5555-1111",
             emergencyContactName: "Laura Perez",
             contactPhone: "11-4444-1111",
@@ -119,7 +206,8 @@ export function StudentsPage() {
           {
             id: "student-2",
             fullName: "Bruno Diaz",
-            email: "bruno@demo.com",
+            dni: "43888999",
+            birthDate: "2009-09-18",
             phone: "11-5555-2222",
             emergencyContactName: "Carlos Diaz",
             contactPhone: "11-4444-2222",
@@ -169,7 +257,8 @@ export function StudentsPage() {
           return {
             id: d.id,
             fullName: String(data.fullName ?? ""),
-            email: String(data.email ?? ""),
+            dni: String(data.dni ?? ""),
+            birthDate: String(data.birthDate ?? ""),
             phone: String(data.phone ?? ""),
             emergencyContactName: String(data.emergencyContactName ?? ""),
             contactPhone: String(data.contactPhone ?? ""),
@@ -221,7 +310,7 @@ export function StudentsPage() {
 
     setError(null);
     if (!editingId && maxStudents !== null && students.filter((student) => student.status === "active").length >= maxStudents) {
-      setError(`Limite alcanzado para plan ${getPlanLabel(platformConfig, plan)}: ${maxStudents} alumnos activos.`);
+      setError(`Límite alcanzado para plan ${getPlanLabel(platformConfig, plan)}: ${maxStudents} alumnos activos.`);
       return;
     }
 
@@ -238,7 +327,8 @@ export function StudentsPage() {
 
     const payload = {
       fullName: form.fullName,
-      email: form.email,
+      dni: form.dni.trim(),
+      birthDate: form.birthDate,
       phone: form.phone,
       emergencyContactName: form.emergencyContactName.trim(),
       contactPhone: form.contactPhone,
@@ -290,7 +380,8 @@ export function StudentsPage() {
     setEditingId(student.id);
     setForm({
       fullName: student.fullName,
-      email: student.email,
+      dni: student.dni,
+      birthDate: student.birthDate,
       phone: student.phone,
       emergencyContactName: student.emergencyContactName,
       contactPhone: student.contactPhone,
@@ -308,31 +399,138 @@ export function StudentsPage() {
     setError(null);
   }
 
+  function handleExportExcel() {
+    const rows = getStudentExportRows(students);
+    const headers = ["Apellido", "Nombre", "DNI", "Fecha de nacimiento", "Disciplina"];
+    const csv = [
+      headers.join(";"),
+      ...rows.map((row) =>
+        [row.lastName, row.firstName, row.dni, row.birthDate, row.discipline]
+          .map((value) => escapeCsvCell(value))
+          .join(";")
+      )
+    ].join("\r\n");
+
+    downloadBlob(`${buildExportFilename("alumnos")}.csv`, new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" }));
+  }
+
+  function handleExportPdf() {
+    const rows = getStudentExportRows(students);
+    const exportWindow = window.open("", "_blank", "width=960,height=720");
+    if (!exportWindow) return;
+
+    const tableRows = rows
+      .map(
+        (row) => `
+          <tr>
+            <td>${escapeHtml(row.lastName || "-")}</td>
+            <td>${escapeHtml(row.firstName || "-")}</td>
+            <td>${escapeHtml(row.dni || "-")}</td>
+            <td>${escapeHtml(row.birthDate || "-")}</td>
+            <td>${escapeHtml(row.discipline || "-")}</td>
+          </tr>`
+      )
+      .join("");
+
+    exportWindow.document.write(`<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Listado de alumnos</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; color: #0f172a; }
+      h1 { margin: 0 0 8px; font-size: 22px; }
+      p { margin: 0 0 16px; color: #475569; font-size: 12px; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; vertical-align: top; }
+      th { background: #e2e8f0; }
+      @media print { body { margin: 12px; } }
+    </style>
+  </head>
+  <body>
+    <h1>Listado de alumnos</h1>
+    <p>Generado el ${escapeHtml(new Date().toLocaleDateString("es-AR"))}</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Apellido</th>
+          <th>Nombre</th>
+          <th>DNI</th>
+          <th>Fecha de nacimiento</th>
+          <th>Disciplina</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRows || '<tr><td colspan="5">No hay alumnos para exportar.</td></tr>'}
+      </tbody>
+    </table>
+  </body>
+</html>`);
+    exportWindow.document.close();
+    exportWindow.focus();
+    window.setTimeout(() => exportWindow.print(), 250);
+  }
+
   const activeStudents = students.filter((student) => student.status === "active").length;
+  const filteredStudents = useMemo(() => {
+    const normalizedSearch = normalizeSearchValue(searchTerm);
+    if (!normalizedSearch) return students;
+
+    return students.filter((student) => normalizeSearchValue(student.fullName).includes(normalizedSearch));
+  }, [searchTerm, students]);
   const hasStudents = students.length > 0;
+  const hasFilteredStudents = filteredStudents.length > 0;
 
   return (
     <>
       <Panel
         title="Alumnos"
         action={
-          <button
-            type="button"
-            onClick={openCreateModal}
-            disabled={!canWriteAcademyData || isPreviewMode}
-            className="rounded-brand bg-primary px-3 py-2 text-xs font-semibold text-bg disabled:opacity-40"
-          >
-            Crear alumno
-          </button>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              disabled={!hasStudents}
+              className="rounded-brand border border-slate-600 px-3 py-2 text-xs font-semibold text-muted hover:border-primary hover:text-primary disabled:opacity-40"
+            >
+              Exportar Excel
+            </button>
+            <button
+              type="button"
+              onClick={handleExportPdf}
+              disabled={!hasStudents}
+              className="rounded-brand border border-slate-600 px-3 py-2 text-xs font-semibold text-muted hover:border-primary hover:text-primary disabled:opacity-40"
+            >
+              Exportar PDF
+            </button>
+            <button
+              type="button"
+              onClick={openCreateModal}
+              disabled={!canWriteAcademyData || isPreviewMode}
+              className="rounded-brand bg-primary px-3 py-2 text-xs font-semibold text-bg disabled:opacity-40"
+            >
+              Crear alumno
+            </button>
+          </div>
         }
       >
+        <div className="mb-3 rounded-brand border border-primary/30 bg-primary/10 p-3 shadow-[0_0_0_1px_rgba(0,209,255,0.08)]">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">Buscador de alumnos</p>
+          <input
+            type="search"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Buscar alumno por nombre y apellido"
+            className="w-full rounded-brand border border-primary/40 bg-surface px-3 py-2 text-sm text-text outline-none placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
         <p className="mb-3 text-xs text-muted">
-          Plan actual: <span className="uppercase text-primary">{getPlanLabel(platformConfig, plan)}</span> | Limite: {maxStudents ?? "Ilimitado"} | Activos: {activeStudents} | Total: {students.length}
+          Plan actual: <span className="uppercase text-primary">{getPlanLabel(platformConfig, plan)}</span> | Límite: {maxStudents ?? "Ilimitado"} | Activos: {activeStudents} | Total: {students.length}
         </p>
-        {hasStudents ? (
+        {hasFilteredStudents ? (
           <>
             <div className="space-y-3 md:hidden">
-              {students.map((student) => (
+              {filteredStudents.map((student) => (
                 <article
                   key={student.id}
                   className={`rounded-brand border border-slate-800 bg-bg p-4 ${student.status === "inactive" ? "opacity-80" : ""}`}
@@ -340,7 +538,7 @@ export function StudentsPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-semibold text-text">{student.fullName}</p>
-                      <p className="break-all text-sm text-muted">{student.email}</p>
+                      <p className="text-sm text-muted">Edad: {formatAgeLabel(student.birthDate)}</p>
                     </div>
                     <button
                       type="button"
@@ -357,7 +555,9 @@ export function StudentsPage() {
                   </div>
 
                   <div className="mt-3 grid gap-2 text-sm text-muted">
-                    <MobileInfo label="Telefono" value={student.phone || "-"} />
+                    <MobileInfo label="DNI" value={student.dni || "-"} />
+                    <MobileInfo label="Fecha de nacimiento" value={student.birthDate || "-"} />
+                    <MobileInfo label="Teléfono" value={student.phone || "-"} />
                     <MobileInfo label="Contacto" value={student.emergencyContactName || "-"} />
                     <MobileInfo label="WhatsApp urgencia" value={student.contactPhone || "-"} href={buildWhatsAppLink(student.contactPhone)} />
                     <MobileInfo label="Alergias" value={student.allergies || "-"} />
@@ -381,20 +581,24 @@ export function StudentsPage() {
                 <thead className="text-left text-muted">
                   <tr>
                     <th className="px-3 py-2">Nombre</th>
-                    <th className="px-3 py-2">Correo</th>
-                    <th className="px-3 py-2">Telefono</th>
+                    <th className="px-3 py-2">DNI</th>
+                    <th className="px-3 py-2">Edad</th>
+                    <th className="px-3 py-2">Nacimiento</th>
+                    <th className="px-3 py-2">Teléfono</th>
                     <th className="px-3 py-2">Contacto</th>
-                    <th className="px-3 py-2">Telefono urgencia</th>
+                    <th className="px-3 py-2">Teléfono urgencia</th>
                     <th className="px-3 py-2">Alergias</th>
                     <th className="px-3 py-2">Estado</th>
-                    <th className="px-3 py-2">Accion</th>
+                    <th className="px-3 py-2">Acción</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {students.map((student) => (
+                  {filteredStudents.map((student) => (
                     <tr key={student.id} className={`border-t border-slate-800 ${student.status === "inactive" ? "opacity-80" : ""}`}>
                       <td className="px-3 py-3">{student.fullName}</td>
-                      <td className="px-3 py-3 text-muted">{student.email}</td>
+                      <td className="px-3 py-3 text-muted">{student.dni || "-"}</td>
+                      <td className="px-3 py-3 text-muted">{formatAgeLabel(student.birthDate)}</td>
+                      <td className="px-3 py-3 text-muted">{student.birthDate || "-"}</td>
                       <td className="px-3 py-3 text-muted">{student.phone || "-"}</td>
                       <td className="px-3 py-3 text-muted">{student.emergencyContactName || "-"}</td>
                       <td className="px-3 py-3 text-muted">
@@ -442,9 +646,14 @@ export function StudentsPage() {
               </table>
             </div>
           </>
+        ) : hasStudents ? (
+          <EmptyState
+            title="No se encontraron alumnos"
+            description="Prueba buscando por nombre o apellido con otra combinación."
+          />
         ) : (
           <EmptyState
-            title="Todavia no hay alumnos cargados"
+            title="Todavía no hay alumnos cargados"
             description="Cuando crees tu primer alumno, aqui vas a ver su contacto, urgencias, disciplinas y estado sin que la pantalla se sienta vacia."
           />
         )}
@@ -485,28 +694,33 @@ export function StudentsPage() {
                   onChange={(value) => setForm((prev) => ({ ...prev, fullName: value }))}
                 />
                 <Field
-                  label="Email"
-                  type="email"
-                  value={form.email}
-                  onChange={(value) => setForm((prev) => ({ ...prev, email: value }))}
+                  label="DNI"
+                  value={form.dni}
+                  onChange={(value) => setForm((prev) => ({ ...prev, dni: value }))}
                 />
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
+                <label className="grid gap-1">
+                  Fecha de nacimiento
+                  <div className="flex items-center gap-3 rounded-brand border border-slate-600 bg-bg px-3 py-2">
+                    <input
+                      type="date"
+                      value={form.birthDate}
+                      onChange={(e) => setForm((prev) => ({ ...prev, birthDate: e.target.value }))}
+                      className="min-w-0 flex-1 bg-transparent outline-none"
+                    />
+                    <span className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-primary">
+                      Edad: {formatAgeLabel(form.birthDate)}
+                    </span>
+                  </div>
+                </label>
                 <Field
-                  label="Telefono del alumno"
+                  label="Teléfono del alumno"
                   value={form.phone}
                   onChange={(value) => setForm((prev) => ({ ...prev, phone: value }))}
                   required={false}
                 />
-                {editingId && (
-                  <div className="rounded-brand border border-slate-700 bg-bg px-3 py-2">
-                    <p className="text-xs uppercase text-muted">Estado actual</p>
-                    <p className={`mt-1 text-sm font-semibold ${students.find((student) => student.id === editingId)?.status === "active" ? "text-secondary" : "text-danger"}`}>
-                      {formatMembershipStatus(students.find((student) => student.id === editingId)?.status ?? "active")}
-                    </p>
-                  </div>
-                )}
               </div>
 
               <SectionTitle title="Datos de urgencia" />
@@ -518,7 +732,7 @@ export function StudentsPage() {
                   required={false}
                 />
                 <Field
-                  label="Telefono de contacto"
+                  label="Teléfono de contacto"
                   value={form.contactPhone}
                   onChange={(value) => setForm((prev) => ({ ...prev, contactPhone: value }))}
                   required={false}
@@ -548,7 +762,7 @@ export function StudentsPage() {
                               ? "Mensual"
                               : discipline.allowPartial
                                 ? "Entrega parcial"
-                                : "Unico"}
+                                : "Único"}
                           </span>
                           <span className="text-primary">${discipline.price}</span>
                           <input
@@ -567,7 +781,7 @@ export function StudentsPage() {
                       </label>
                     ))
                 ) : (
-                  <p className="text-xs text-muted">Primero crea disciplinas en el modulo Disciplinas.</p>
+                  <p className="text-xs text-muted">Primero crea disciplinas en el módulo Disciplinas.</p>
                 )}
               </div>
 

@@ -106,6 +106,14 @@ function buildSingleChargeConcept(category: FeeCategory, disciplineName: string)
   return `${formatBillingType(category)} - ${disciplineName}`;
 }
 
+function normalizeSearchValue(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 function sortFees(fees: Fee[], students: StudentOption[]) {
   const studentNames = new Map(students.map((student) => [student.id, student.fullName]));
 
@@ -190,6 +198,7 @@ export function FeesPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [billingSettings, setBillingSettings] = useState<AcademyBillingSettings>(DEFAULT_ACADEMY_BILLING_SETTINGS);
+  const [searchTerm, setSearchTerm] = useState("");
   const academyPath = membership ? `academies/${membership.academyId}` : null;
 
   async function syncAssignedFees(studentsList: StudentOption[], disciplinesList: DisciplineCatalogItem[], feesList: Fee[]) {
@@ -495,6 +504,8 @@ export function FeesPage() {
   }, [fees]);
 
   const trackingRows = useMemo(() => {
+    const normalizedSearch = normalizeSearchValue(searchTerm);
+
     return fees
       .map((fee) => {
         const student = students.find((item) => item.id === fee.studentId);
@@ -513,8 +524,9 @@ export function FeesPage() {
           )
         };
       })
-      .filter((fee) => fee.daysLeft <= 15);
-  }, [fees, students]);
+      .filter((fee) => fee.daysLeft <= 15)
+      .filter((fee) => !normalizedSearch || normalizeSearchValue(fee.studentName).includes(normalizedSearch));
+  }, [fees, searchTerm, students]);
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -588,6 +600,17 @@ export function FeesPage() {
           <p className="mt-1 text-muted">
             Aqui gestionas total, entregado, saldo, vencimiento y seguimiento. El estado se actualiza solo segun lo que falta cobrar.
           </p>
+        </div>
+
+        <div className="mb-4 rounded-brand border border-primary/30 bg-primary/10 p-3 shadow-[0_0_0_1px_rgba(0,209,255,0.08)]">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">Buscador de cuotas</p>
+          <input
+            type="search"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Buscar cuota por nombre y apellido"
+            className="w-full rounded-brand border border-primary/40 bg-surface px-3 py-2 text-sm text-text outline-none placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/20"
+          />
         </div>
 
         {hasFees ? (
@@ -668,7 +691,11 @@ export function FeesPage() {
             </article>
           ))}
           {trackingRows.length === 0 && (
-            <p className="text-sm text-muted">No hay cuotas para seguir dentro de los proximos 15 dias.</p>
+            <p className="text-sm text-muted">
+              {searchTerm.trim()
+                ? "No se encontraron cuotas para ese nombre o apellido."
+                : "No hay cuotas para seguir dentro de los proximos 15 dias."}
+            </p>
           )}
             </div>
             <div className="hidden xl:block">
@@ -747,7 +774,9 @@ export function FeesPage() {
                   {trackingRows.length === 0 && (
                     <tr>
                       <td className="px-3 py-3 text-muted" colSpan={11}>
-                        No hay cuotas para seguir dentro de los proximos 15 dias.
+                        {searchTerm.trim()
+                          ? "No se encontraron cuotas para ese nombre o apellido."
+                          : "No hay cuotas para seguir dentro de los proximos 15 dias."}
                       </td>
                     </tr>
                   )}
