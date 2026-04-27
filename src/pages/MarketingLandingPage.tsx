@@ -1,5 +1,5 @@
 import { doc, getDoc } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AuthEntryPanel } from "../components/auth/AuthEntryPanel";
 import paysyncLogo from "../asset/logo_paysync.png";
@@ -13,7 +13,6 @@ import { Testimonials } from "../components/landing/Testimonials";
 import { db } from "../lib/firebase";
 import {
   DEFAULT_PLATFORM_CONFIG,
-  getPlanPrice,
   normalizePlatformConfig,
   type PlatformConfig
 } from "../lib/plans";
@@ -30,8 +29,6 @@ export function MarketingLandingPage() {
 
     void loadPlatformConfig();
   }, []);
-
-  const startingMonthlyPrice = useMemo(() => getPlanPrice(config, "basic"), [config]);
 
   return (
     <div className="min-h-screen bg-[#0B0B0B] text-white">
@@ -102,7 +99,7 @@ export function MarketingLandingPage() {
           <Testimonials onPrimaryClick={() => setAuthModalMode("register")} />
           <Pricing
             trialDays={config.trialDurationDays}
-            monthlyPrice={startingMonthlyPrice}
+            platformConfig={config}
             onPrimaryClick={() => setAuthModalMode("register")}
           />
           <FinalCTA onPrimaryClick={() => setAuthModalMode("register")} />
